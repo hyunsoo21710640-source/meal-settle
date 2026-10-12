@@ -139,7 +139,7 @@ function outstanding() {
 }
 
 /* ===================== 탭 전환 ===================== */
-const TAB_TITLES = { record: '기록', list: '내역', settle: '정산', settings: '설정' };
+const TAB_TITLES = { record: '오늘 뭐 먹었어요?', list: '먹은 기록', settle: '정산', settings: '설정' };
 let currentTab = 'record';
 
 function showTab(tab) {
@@ -500,8 +500,8 @@ function renderSettle() {
 
   // 요약
   html += `
-    <div class="card">
-      <div class="sub">받을 돈 합계</div>
+    <div class="card ${total ? 'hero' : ''}">
+      <div class="sub">아직 받을 돈</div>
       <div class="big">${won(total)}</div>
       <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명` : '모두 정산됐어요'}</div>
     </div>`;
