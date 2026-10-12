@@ -1,6 +1,6 @@
 // 앱 파일을 저장해 두고 인터넷 없이도 열리게 하는 서비스워커
 /* =====================================================================
-   - 앱 파일(같은 주소): 네트워크 우선 → 고친 내용이 바로 반영, 오프라인이면 저장본 사용
+   - 앱 파일(같은 주소): 네트워크 우선(브라우저 캐시도 건너뜀) → 고친 내용이 바로 반영, 오프라인이면 저장본 사용
    - 글꼴(Google Fonts): 저장본 우선 → 한 번 받으면 오프라인에서도 같은 글꼴
    - 기록 데이터는 여기가 아니라 localStorage에 있다 (서비스워커와 무관)
    - 앱 파일 목록을 바꾸면 CACHE 이름의 숫자를 올린다
@@ -38,8 +38,9 @@ self.addEventListener('fetch', e => {
   }
   if (url.origin !== location.origin) return;
 
+  // no-cache: 브라우저가 기억한 옛 파일(GitHub Pages는 10분 보관) 대신 매번 서버에 새 버전이 있는지 확인
   e.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then(res => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req, copy)); }
         return res;
