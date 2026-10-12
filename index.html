@@ -147,6 +147,22 @@
     </div>
 
     <div class="card">
+      <div class="label">엑셀로 내보내기</div>
+      <div class="row2">
+        <div>
+          <div class="label">시작일</div>
+          <input type="date" id="xFrom">
+        </div>
+        <div>
+          <div class="label">종료일</div>
+          <input type="date" id="xTo">
+        </div>
+      </div>
+      <button class="btn primary mt" id="xlsxBtn">엑셀 파일 저장</button>
+      <p class="hint" id="xlsxHint"></p>
+    </div>
+
+    <div class="card">
       <div class="label">데이터 백업</div>
       <div class="btnrow">
         <button class="btn small" id="exportBtn">백업 파일 저장</button>
@@ -184,6 +200,7 @@
 
 <div class="toast" id="toast" hidden></div>
 
+<script src="xlsx.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

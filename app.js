@@ -618,6 +618,9 @@ function renderSettings() {
   $('#sMe').value = nameOf('me') === '나' ? '' : nameOf('me');
   $('#sAccount').value = state.account;
   setSeg('#sRound', state.rounding);
+  if (!$('#xFrom').value) $('#xFrom').value = todayStr().slice(0, 8) + '01';   // 기본: 이번 달 1일 ~ 오늘
+  if (!$('#xTo').value) $('#xTo').value = todayStr();
+  renderXlsxHint();
   const used = usedIds();
   const others = state.members.filter(m => m.id !== 'me');
   $('#memberList').innerHTML = others.length ? others.map(m => `
@@ -664,14 +667,92 @@ $('#memberList').addEventListener('click', e => {
   saveState(); renderSettings();
 });
 
-// 백업 파일 저장
-$('#exportBtn').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+function downloadBlob(blob, filename) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `식대정산_백업_${todayStr()}.json`;
+  a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// 엑셀 내보내기: 기간 안의 기록 → 시트 3개 (식사별 / 사람별 상세 / 사람별 합계)
+const mealsBetween = (from, to) => state.meals
+  .filter(m => m.date >= from && m.date <= to)
+  .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+
+function renderXlsxHint() {
+  const from = $('#xFrom').value, to = $('#xTo').value;
+  $('#xlsxHint').textContent = from && to && from <= to
+    ? `이 기간 기록 ${mealsBetween(from, to).length}건 · 파일은 휴대폰 '다운로드' 폴더에 저장돼요.`
+    : '시작일과 종료일을 확인해 주세요.';
+}
+
+function exportSheets(meals) {
+  const H = v => ({ v, s: 'head' }), B = v => ({ v, s: 'bold' });
+  const dow = d => DOW[parseDate(d).getDay()];
+  const fullName = id => (id === 'me' ? `${nameOf('me')}(결제자)` : nameOf(id));
+  const paidSum = m => m.participants.reduce((a, id) => a + (id !== 'me' && isPaid(m, id) ? m.shares[id] || 0 : 0), 0);
+
+  const mealRows = meals.map(m => {
+    const mine = m.shares.me || 0, paid = paidSum(m), toGet = m.total - mine;
+    return [m.date, dow(m.date), m.type, m.place, m.split === 'equal' ? '1/N' : '개별 금액',
+      m.participants.length, ordered(m.participants).map(nameOf).join(', '),
+      m.total, mine, toGet, paid, toGet - paid,
+      isDone(m) ? '정산 완료' : paid ? '일부 입금' : '미정산', m.memo || ''];
+  });
+  const col = i => mealRows.reduce((a, r) => a + r[i], 0);
+
+  const detailRows = meals.flatMap(m => ordered(m.participants).map(id => [
+    m.date, dow(m.date), m.type, m.place, fullName(id), m.shares[id] || 0,
+    id === 'me' ? '결제자' : isPaid(m, id) ? '입금 완료' : '미입금',
+    id !== 'me' && isPaid(m, id) ? dateStr(new Date(m.paid[id])) : '',
+  ]));
+
+  const per = {};
+  meals.forEach(m => m.participants.forEach(id => {
+    const p = (per[id] ||= { n: 0, amt: 0, paid: 0 });
+    p.n++; p.amt += m.shares[id] || 0;
+    if (id !== 'me' && isPaid(m, id)) p.paid += m.shares[id] || 0;
+  }));
+  const personIdsAll = [...state.members.map(m => m.id).filter(id => per[id]), ...Object.keys(per).filter(id => !member(id))];
+  const personRows = personIdsAll.map(id => id === 'me'
+    ? [fullName(id), per[id].n, per[id].amt, '', '']
+    : [fullName(id), per[id].n, per[id].amt, per[id].paid, per[id].amt - per[id].paid]);
+  const others = personIdsAll.filter(id => id !== 'me');
+
+  return [
+    { name: '식사별', cols: [12, 6, 7, 18, 10, 6, 30, 11, 11, 11, 11, 11, 10, 20], rows: [
+      ['날짜', '요일', '구분', '식당', '나누는 방식', '인원', '참석자', '총액', '내 부담', '받을 돈', '입금 받은 돈', '미입금', '상태', '메모'].map(H),
+      ...mealRows,
+      [B('합계'), '', '', '', '', '', '', B(col(7)), B(col(8)), B(col(9)), B(col(10)), B(col(11))],
+    ] },
+    { name: '사람별 상세', cols: [12, 6, 7, 18, 16, 11, 10, 12], rows: [
+      ['날짜', '요일', '구분', '식당', '이름', '부담액', '입금 상태', '입금 확인일'].map(H),
+      ...detailRows,
+    ] },
+    { name: '사람별 합계', cols: [16, 10, 12, 12, 12], rows: [
+      ['이름', '식사 횟수', '부담액 합계', '입금 완료', '미입금'].map(H),
+      ...personRows,
+      [B('팀원 합계'), '', B(others.reduce((a, id) => a + per[id].amt, 0)),
+        B(others.reduce((a, id) => a + per[id].paid, 0)), B(others.reduce((a, id) => a + per[id].amt - per[id].paid, 0))],
+    ] },
+  ];
+}
+
+$('#xFrom').addEventListener('change', renderXlsxHint);
+$('#xTo').addEventListener('change', renderXlsxHint);
+$('#xlsxBtn').addEventListener('click', () => {
+  const from = $('#xFrom').value, to = $('#xTo').value;
+  if (!from || !to || from > to) return toast('시작일과 종료일을 확인해 주세요');
+  const meals = mealsBetween(from, to);
+  if (!meals.length) return toast('이 기간에는 기록이 없어요');
+  downloadBlob(new Blob([buildXlsx(exportSheets(meals))], { type: XLSX_MIME }), `식대정산_${from}_${to}.xlsx`);
+  toast(`엑셀 파일을 저장했어요 · ${meals.length}건`);
+});
+
+// 백업 파일 저장
+$('#exportBtn').addEventListener('click', () => {
+  downloadBlob(new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' }), `식대정산_백업_${todayStr()}.json`);
 });
 // 백업 불러오기
 $('#importBtn').addEventListener('click', () => $('#importFile').click());
