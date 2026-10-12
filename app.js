@@ -520,6 +520,96 @@ function buildMessage(per, ids) {
   return lines.join('\n');
 }
 
+// 요일별 표의 열: 한 주 안이면 월~금(+기록 있는 주말), 여러 주면 기록 있는 날짜만
+function tableDates(per, ids) {
+  const dates = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m.date)))].sort();
+  const mon = mondayOf(dates[0]);
+  if (mondayOf(dates[dates.length - 1]) !== mon) return dates;
+  const week = [...Array(7)].map((_, i) => { const d = parseDate(mon); d.setDate(d.getDate() + i); return dateStr(d); });
+  return week.filter((d, i) => i < 5 || dates.includes(d));
+}
+
+// 정산 표를 그림으로 그림 (카톡에 사진으로 보내기용)
+async function drawTable(per, ids) {
+  try { await document.fonts.load('700 16px "Noto Sans KR"'); } catch (_) { /* 오프라인이면 기본 글꼴 */ }
+  const dates = tableDates(per, ids);
+  const cell = {};   // cell[id][date] = { amt, voucher }
+  ids.forEach(id => {
+    cell[id] = {};
+    per[id].items.forEach(x => {
+      const c = (cell[id][x.m.date] ||= { amt: 0, voucher: false });
+      c.amt += x.amt; c.voucher ||= !!x.m.voucher;
+    });
+  });
+  const C = { bg: '#ffffff', head: '#fbf1e4', text: '#3b2a20', sub: '#7a6656', line: '#f1e6d8',
+    accent: '#c9450e', save: '#2f7a4f', saveBg: '#e3f1e6' };
+  const F = (w, s) => `${w} ${s}px "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", sans-serif`;
+  const ctx = document.createElement('canvas').getContext('2d');
+  const W = (font, t) => { ctx.font = font; return ctx.measureText(t).width; };
+
+  const pad = 24, rowH = 40, headH = 54, gap = 14;
+  const nameW = Math.max(64, ...ids.map(id => W(F(700, 15), nameOf(id)))) + 24;
+  const dayW = Math.max(66, ...ids.flatMap(id => dates.map(d => W(F(500, 15), fmt(cell[id][d]?.amt || 0))))) + 20;
+  const sumW = Math.max(80, ...ids.map(id => W(F(700, 15), fmt(per[id].amt)))) + 24;
+  const tableW = nameW + dayW * dates.length + sumW;
+  const range = dates.length > 1 ? `${fmtDate(dates[0])}~${fmtDate(dates[dates.length - 1])}` : fmtDate(dates[0]);
+  const hasVoucher = ids.some(id => dates.some(d => cell[id][d]?.voucher));
+  const foot = [hasVoucher && '초록 칸: 지역상품권 할인 적용', state.account && `입금 계좌: ${state.account}`].filter(Boolean);
+  const titleH = 56;
+  const width = Math.ceil(Math.max(tableW, W(F(700, 20), `식대 정산 ${range}`)) + pad * 2);
+  const height = Math.ceil(pad + titleH + headH + rowH * (ids.length + 1) + (foot.length ? gap + foot.length * 22 : 0) + pad);
+
+  const scale = 2, cv = ctx.canvas;
+  cv.width = width * scale; cv.height = height * scale;
+  ctx.scale(scale, scale);
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
+  ctx.textBaseline = 'middle';
+  const text = (t, x, y, font, color, align = 'left') => { ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.fillText(t, x, y); };
+
+  text(`식대 정산 ${range}`, pad, pad + 14, F(700, 20), C.text);
+  text(`미입금 ${ids.length}명 · 합계 ${won(ids.reduce((a, id) => a + per[id].amt, 0))}`, pad, pad + 40, F(500, 13), C.sub);
+
+  let y = pad + titleH;
+  const colX = i => pad + nameW + dayW * i;
+  ctx.fillStyle = C.head; ctx.fillRect(pad, y, tableW, headH);
+  dates.forEach((d, i) => {
+    const cx = colX(i) + dayW / 2;
+    text(DOW[parseDate(d).getDay()], cx, y + 19, F(700, 15), C.text, 'center');
+    text(`${parseDate(d).getMonth() + 1}/${parseDate(d).getDate()}`, cx, y + 38, F(500, 12), C.sub, 'center');
+  });
+  text('합계', colX(dates.length) + sumW / 2, y + headH / 2, F(700, 15), C.text, 'center');
+  y += headH;
+
+  const rows = [...ids.map(id => ({ name: nameOf(id), cells: dates.map(d => cell[id][d]), total: per[id].amt })),
+    { name: '합계', sumRow: true,
+      cells: dates.map(d => ({ amt: ids.reduce((a, id) => a + (cell[id][d]?.amt || 0), 0) })),
+      total: ids.reduce((a, id) => a + per[id].amt, 0) }];
+  rows.forEach(r => {
+    if (r.sumRow) { ctx.fillStyle = C.head; ctx.fillRect(pad, y, tableW, rowH); }
+    text(r.name, pad + 12, y + rowH / 2, F(700, 15), C.text);
+    r.cells.forEach((c, i) => {
+      const amt = c?.amt || 0;
+      if (c?.voucher) { ctx.fillStyle = C.saveBg; ctx.fillRect(colX(i) + 1, y + 1, dayW - 2, rowH - 2); }
+      text(amt ? fmt(amt) : '-', colX(i) + dayW - 10, y + rowH / 2, F(r.sumRow ? 700 : 500, 15),
+        amt ? (c?.voucher ? C.save : C.text) : C.sub, 'right');
+    });
+    text(fmt(r.total), colX(dates.length) + sumW - 12, y + rowH / 2, F(700, 15), C.accent, 'right');
+    y += rowH;
+  });
+
+  // 격자
+  ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+  const top = pad + titleH, bottom = y;
+  ctx.strokeRect(pad + .5, top + .5, tableW - 1, bottom - top - 1);
+  [nameW, ...dates.map((_, i) => nameW + dayW * (i + 1))].forEach(x => {
+    ctx.beginPath(); ctx.moveTo(pad + x + .5, top); ctx.lineTo(pad + x + .5, bottom); ctx.stroke();
+  });
+  for (let ry = top + headH; ry < bottom; ry += rowH) { ctx.beginPath(); ctx.moveTo(pad, ry + .5); ctx.lineTo(pad + tableW, ry + .5); ctx.stroke(); }
+
+  foot.forEach((t, i) => text(t, pad, y + gap + 11 + i * 22, F(500, 13), i === 0 && hasVoucher ? C.save : C.sub));
+  return cv;
+}
+
 function paidBatches() {
   const map = {};
   state.meals.forEach(m => Object.entries(m.paid || {}).forEach(([id, ts]) => {
@@ -585,6 +675,17 @@ function renderSettle() {
         </div>
         ${state.account ? '' : '<p class="hint">설정에서 입금 계좌를 넣으면 메시지에 함께 표시돼요.</p>'}
       </div>`;
+
+    // 요일별 표 (이미지)
+    html += `
+      <div class="card">
+        <div class="label">요일별 표 <span class="sub">사진으로 보내기</span></div>
+        <div class="table-img"><img id="tableImg" alt="요일별 정산 표"></div>
+        <div class="btnrow">
+          ${canShareImage() ? '<button class="btn primary" id="shareImgBtn">표 이미지 공유</button>' : ''}
+          <button class="btn" id="saveImgBtn">이미지 저장</button>
+        </div>
+      </div>`;
   }
 
   // 최근 입금 확인 (실수했을 때 취소)
@@ -601,7 +702,24 @@ function renderSettle() {
   }
 
   $('#settleBody').innerHTML = html;
+  if (ids.length) {
+    const ver = ++tableVer;
+    tableCanvas = null;
+    drawTable(per, ids).then(cv => {
+      if (ver !== tableVer || !$('#tableImg')) return;   // 그리는 사이 화면이 다시 그려졌으면 버림
+      tableCanvas = cv;
+      $('#tableImg').src = cv.toDataURL('image/png');
+    });
+  }
 }
+
+let tableCanvas = null, tableVer = 0;
+const tableFileName = () => `식대정산_${todayStr()}.png`;
+const canShareImage = () => {
+  try { return !!navigator.canShare?.({ files: [new File([''], 'a.png', { type: 'image/png' })] }); }
+  catch (_) { return false; }
+};
+const canvasBlob = cv => new Promise(res => cv.toBlob(res, 'image/png'));
 
 function markPaid(id) {
   const ts = Date.now();
@@ -644,6 +762,13 @@ $('#settleBody').addEventListener('click', async e => {
   }
   if (e.target.closest('#shareBtn')) {
     try { await navigator.share({ text: $('#msgBox').textContent }); } catch (_) {}
+    return;
+  }
+  if (e.target.closest('#shareImgBtn, #saveImgBtn')) {
+    if (!tableCanvas) return toast('표를 만드는 중이에요. 잠시 후 다시 눌러 주세요');
+    const blob = await canvasBlob(tableCanvas);
+    if (e.target.closest('#saveImgBtn')) { downloadBlob(blob, tableFileName()); return toast('표 이미지를 저장했어요'); }
+    try { await navigator.share({ files: [new File([blob], tableFileName(), { type: 'image/png' })] }); } catch (_) {}
     return;
   }
 
