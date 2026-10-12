@@ -776,3 +776,10 @@ $('#resetBtn').addEventListener('click', () => {
 
 /* ===================== 시작 ===================== */
 showTab(state.members.length > 1 ? 'record' : 'settings');
+
+// 앱 설치(PWA) · 오프라인 실행용 서비스워커. https 또는 localhost에서만 동작
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+// 저장공간이 부족해도 브라우저가 기록을 자동으로 지우지 않도록 요청
+navigator.storage?.persist?.().catch(() => {});
