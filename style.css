@@ -1,20 +1,20 @@
 /* =====================================================================
    식대 정산 - 디자인
    색상은 맨 위 :root 변수만 바꾸면 전체에 적용됩니다.
-   글꼴: 제목·금액 Jua, 본문 Noto Sans KR (index.html에서 불러옴)
+   글꼴: 화면 제목·정산 합계 Jua, 나머지(금액 포함) Noto Sans KR (index.html에서 불러옴)
    ===================================================================== */
 
 /* ================= 색상 / 기본값 ================= */
 :root {
   color-scheme: light;   /* 휴대폰이 다크 모드여도 항상 밝은 화면 */
-  --bg: #fff8ef; --card: #ffffff; --text: #3b2a20; --sub: #7a6656; --line: #f0e2d0;
-  --input: #fbf1e4; --seg: #f3e6d5; --border: #eadbc8;
+  --bg: #fff8ef; --card: #ffffff; --text: #3b2a20; --sub: #7a6656; --line: #f1e6d8;
+  --input: #fbf1e4; --seg: #f3e6d5; --border: #ecdfcf;
   --accent: #c9450e; --accent-weak: #ffe8d6; --on-accent: #ffffff;
   --danger: #b3261e; --ok: #2f7a4f; --ok-weak: #e3f1e6;
   --warn: #9a4a0c; --warn-weak: #ffefd9;
   --lunch: #6b4b00; --lunch-weak: #ffefc2;
   --dinner: #8a2433; --dinner-weak: #fce1e4;
-  --radius: 20px; --nav-h: 64px;
+  --radius: 16px; --nav-h: 64px;
   --display: Jua, "Noto Sans KR", sans-serif;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -34,7 +34,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   padding: calc(16px + env(safe-area-inset-top)) 16px 12px;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
 }
-.topbar h1 { font-family: var(--display); font-size: 28px; line-height: 1.25; margin: 0; font-weight: 400; }
+.topbar h1 { font-family: var(--display); font-size: 26px; line-height: 1.25; margin: 0; font-weight: 400; }
 .owe-pill {
   border: 0; background: var(--accent-weak); color: var(--accent);
   font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 999px; min-height: 36px;
@@ -43,9 +43,9 @@ main {
   max-width: 480px; margin: 0 auto;
   padding: 0 16px calc(var(--nav-h) + 92px + env(safe-area-inset-bottom));
 }
-.card { background: var(--card); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; }
 .label {
-  font-size: 13px; color: var(--sub); font-weight: 700; margin-bottom: 8px;
+  font-size: 13px; color: var(--sub); font-weight: 500; margin-bottom: 8px;
   display: flex; justify-content: space-between; align-items: center; gap: 8px;
 }
 .mt { margin-top: 16px; }
@@ -56,16 +56,16 @@ main {
 /* ================= 입력 요소 ================= */
 input[type=text], input[type=date] {
   display: block; width: 100%; min-height: 48px; font: inherit; color: var(--text);
-  background: var(--input); border: 1.5px solid var(--border); border-radius: 14px;
+  background: var(--input); border: 1.5px solid transparent; border-radius: 12px;
   padding: 11px 14px; outline: none; -webkit-appearance: none; appearance: none;
 }
 input:focus { border-color: var(--accent); }
 input::placeholder { color: var(--sub); opacity: .7; }
 
 .amount-input { position: relative; }
-.amount-input input { text-align: right; padding-right: 36px; font-family: var(--display); font-size: 24px; font-weight: 400; }
+.amount-input input { text-align: right; padding-right: 36px; font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .amount-input span { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--sub); font-weight: 500; }
-.amount-input.sm input { font-size: 18px; }
+.amount-input.sm input { font-size: 17px; }
 
 .seg { display: flex; background: var(--seg); border-radius: 16px; padding: 4px; gap: 4px; }
 .seg button {
@@ -76,20 +76,20 @@ input::placeholder { color: var(--sub); opacity: .7; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
-  border: 1.5px dashed var(--border); background: transparent; border-radius: 999px;
-  padding: 8px 15px; min-height: 40px; font-size: 15px; font-weight: 500; color: var(--sub);
+  border: 1.5px solid var(--border); background: var(--card); border-radius: 999px;
+  padding: 8px 15px; min-height: 40px; font-size: 15px; font-weight: 500; color: var(--text);
 }
-.chip.on { background: var(--accent); border: 1.5px solid var(--accent); color: var(--on-accent); }
+.chip.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); font-weight: 700; }
 
 .linkbtn { border: 0; background: none; color: var(--accent); font-size: 13px; font-weight: 700; padding: 4px 2px; }
 .linkbtn.danger { color: var(--danger); }
 
 .btn {
-  display: block; width: 100%; border: 1.5px solid var(--border); border-radius: 999px; padding: 14px;
+  display: block; width: 100%; border: 1.5px solid var(--border); border-radius: 14px; padding: 14px;
   font-size: 16px; font-weight: 700; background: var(--card); color: var(--text);
 }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.btn.small { display: inline-block; width: auto; padding: 8px 14px; font-size: 14px; min-height: 40px; }
+.btn.small { display: inline-block; width: auto; padding: 8px 14px; font-size: 14px; min-height: 40px; border-radius: 10px; }
 .btn.ok { background: var(--card); border-color: var(--accent); color: var(--accent); }
 .btn:active, .chip:active, .seg button:active { transform: scale(.97); }
 .btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -100,8 +100,8 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .iname { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-banner { background: var(--warn-weak); color: var(--warn); display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; }
 .pv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-.pv-head b { font-family: var(--display); font-weight: 400; font-size: 22px; color: var(--accent); }
-.pv-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 15px; border-top: 1px dashed var(--line); }
+.pv-head b { font-weight: 700; font-size: 19px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.pv-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 15px; border-top: 1px solid var(--line); }
 .pv-row.me { color: var(--sub); }
 
 .sticky-action {
@@ -113,10 +113,10 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .sticky-action .btn { min-height: 52px; font-size: 17px; }
 
 /* ================= 내역 탭 ================= */
-.date-head { font-family: var(--display); font-size: 18px; font-weight: 400; color: var(--text); margin: 20px 4px 8px; }
+.date-head { font-size: 13px; font-weight: 700; color: var(--sub); margin: 18px 4px 8px; }
 .meal-top { display: flex; align-items: center; gap: 8px; }
 .meal-place { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 16px; }
-.meal-total { font-family: var(--display); font-weight: 400; font-size: 19px; }
+.meal-total { font-weight: 700; font-size: 17px; font-variant-numeric: tabular-nums; }
 .meal-memo { color: var(--sub); font-size: 13px; margin-top: 4px; }
 .shares { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .share { font-size: 13px; background: var(--input); padding: 4px 10px; border-radius: 999px; }
@@ -133,7 +133,7 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .empty { text-align: center; color: var(--sub); padding: 48px 16px; font-size: 15px; }
 
 /* ================= 정산 탭 ================= */
-.hero { background: var(--accent); color: var(--on-accent); }
+.hero { background: linear-gradient(135deg, #d4531a, var(--accent)); border: 0; color: var(--on-accent); }
 .hero .sub { color: inherit; font-weight: 500; }
 .big { font-family: var(--display); font-size: 36px; font-weight: 400; line-height: 1.2; margin: 2px 0 4px; }
 .person { border-top: 1px solid var(--line); padding: 12px 0; }
@@ -141,13 +141,13 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .person-line { display: flex; align-items: center; gap: 10px; }
 .person-main { flex: 1; min-width: 0; min-height: 44px; border: 0; background: none; padding: 0; text-align: left; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .person-main b { font-size: 16px; }
-.person-amt { font-family: var(--display); font-size: 19px; font-weight: 400; white-space: nowrap; }
+.person-amt { font-size: 17px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .person-detail { margin-top: 8px; background: var(--input); border-radius: 12px; padding: 8px 12px; }
 .drow { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 3px 0; }
 .drow span:first-child { color: var(--sub); }
 .msg {
-  white-space: pre-wrap; word-break: keep-all; background: var(--lunch-weak); color: var(--text);
-  border-radius: 18px 18px 18px 4px; padding: 14px 16px; font-size: 14px; margin: 0 0 12px; font-family: inherit; line-height: 1.6;
+  white-space: pre-wrap; word-break: keep-all; background: var(--input); color: var(--text);
+  border-radius: 14px; padding: 14px 16px; font-size: 14px; margin: 0 0 12px; font-family: inherit; line-height: 1.6;
 }
 .check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 12px; min-height: 32px; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
@@ -174,6 +174,7 @@ input::placeholder { color: var(--sub); opacity: .7; }
 }
 .navbtn svg { width: 24px; height: 24px; }
 .navbtn.on { color: var(--accent); font-weight: 700; }
+.navbtn.on svg { width: 56px; height: 30px; padding: 3px 0; border-radius: 999px; background: var(--accent-weak); }
 
 /* ================= 토스트 ================= */
 .toast {
