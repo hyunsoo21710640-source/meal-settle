@@ -6,7 +6,7 @@
 
 /* ================= 색상 / 기본값 ================= */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;   /* 휴대폰이 다크 모드여도 항상 밝은 화면 */
   --bg: #fff8ef; --card: #ffffff; --text: #3b2a20; --sub: #7a6656; --line: #f0e2d0;
   --input: #fbf1e4; --seg: #f3e6d5; --border: #eadbc8;
   --accent: #c9450e; --accent-weak: #ffe8d6; --on-accent: #ffffff;
@@ -16,17 +16,6 @@
   --dinner: #8a2433; --dinner-weak: #fce1e4;
   --radius: 20px; --nav-h: 64px;
   --display: Jua, "Noto Sans KR", sans-serif;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1e1814; --card: #2a221c; --text: #f5ebdd; --sub: #b8a593; --line: #3a2f27;
-    --input: #342a22; --seg: #3a2f27; --border: #4a3c31;
-    --accent: #ff8a4c; --accent-weak: #4a2a18; --on-accent: #2a1408;
-    --danger: #ff8a80; --ok: #7fd4a0; --ok-weak: #1f3a2a;
-    --warn: #ffb370; --warn-weak: #45301c;
-    --lunch: #ffd970; --lunch-weak: #3f3418;
-    --dinner: #ffadb8; --dinner-weak: #45232a;
-  }
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; }
