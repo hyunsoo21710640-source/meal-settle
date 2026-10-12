@@ -1,0 +1,7 @@
+# 설정 > 백업 파일 저장으로 받은 파일 (개인 지출 기록)
+식대정산_백업_*.json
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store

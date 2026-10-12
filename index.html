@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#101113" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="식대정산">
+<title>식대 정산</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233182f6'/%3E%3Ctext x='32' y='43' font-size='30' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'%3E%E2%82%A9%3C/text%3E%3C/svg%3E">
+<!-- 한글 폰트(Pretendard). 인터넷이 안 되면 기본 폰트로 표시됩니다. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <h1 id="pageTitle">기록</h1>
+  <button class="owe-pill" id="owePill" hidden></button>
+</header>
+
+<main>
+  <!-- ==================== ① 기록 탭 ==================== -->
+  <section class="tab" id="tab-record">
+    <div class="card edit-banner" id="editBanner" hidden>
+      <span>기록 수정 중</span>
+      <button class="linkbtn" id="cancelEdit">수정 취소</button>
+    </div>
+
+    <div class="card">
+      <div class="row2">
+        <div>
+          <div class="label">날짜</div>
+          <input type="date" id="fDate">
+        </div>
+        <div>
+          <div class="label">구분</div>
+          <div class="seg" id="fType">
+            <button data-v="점심">점심</button>
+            <button data-v="회식">회식</button>
+          </div>
+        </div>
+      </div>
+      <div class="label mt">식당</div>
+      <input type="text" id="fPlace" list="placeList" placeholder="예: 시골국밥" autocomplete="off">
+      <datalist id="placeList"></datalist>
+    </div>
+
+    <div class="card">
+      <div class="label">
+        <span>참석자</span>
+        <span><button class="linkbtn" id="pickLast">지난번 멤버</button> · <button class="linkbtn" id="pickAll">전체</button> · <button class="linkbtn" id="pickNone">해제</button></span>
+      </div>
+      <div class="chips" id="fPeople"></div>
+      <p class="hint" id="noMembersHint" hidden>
+        팀원이 아직 없어요. <button class="linkbtn" id="goSettings">설정에서 팀원 추가하기 →</button>
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="label">나누는 방식</div>
+      <div class="seg" id="fSplit">
+        <button data-v="individual">개별 금액</button>
+        <button data-v="equal">1/N 균등</button>
+      </div>
+
+      <div id="equalBox" class="mt">
+        <div class="label">총 결제액</div>
+        <div class="amount-input">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="fTotal" placeholder="0">
+          <span>원</span>
+        </div>
+      </div>
+
+      <div id="indivBox" class="mt">
+        <div class="label">
+          <span>각자 먹은 금액</span>
+          <button class="linkbtn" id="fillLast" hidden>지난번 금액 불러오기</button>
+        </div>
+        <div id="indivRows"></div>
+        <div class="label mt">
+          <span>공통 금액 <span class="sub">(사이드·음료 등, 1/N 추가)</span></span>
+        </div>
+        <div class="amount-input sm">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" id="fCommon" placeholder="0">
+          <span>원</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">메모 (선택)</div>
+      <input type="text" id="fMemo" placeholder="예: 신규 입사자 환영">
+    </div>
+
+    <div class="card" id="preview"></div>
+  </section>
+
+  <!-- ==================== ② 내역 탭 ==================== -->
+  <section class="tab" id="tab-list" hidden>
+    <div class="seg" id="listFilter">
+      <button data-v="open">미정산</button>
+      <button data-v="all">전체</button>
+    </div>
+    <div id="listBody"></div>
+  </section>
+
+  <!-- ==================== ③ 정산 탭 ==================== -->
+  <section class="tab" id="tab-settle" hidden>
+    <div id="settleBody"></div>
+  </section>
+
+  <!-- ==================== ④ 설정 탭 ==================== -->
+  <section class="tab" id="tab-settings" hidden>
+    <div class="card">
+      <div class="label">내 이름 (결제자)</div>
+      <input type="text" id="sMe" placeholder="예: 박현수">
+    </div>
+
+    <div class="card">
+      <div class="label">팀원</div>
+      <div id="memberList"></div>
+      <div class="addrow">
+        <input type="text" id="newMember" placeholder="이름 입력 후 추가">
+        <button class="btn small primary" id="addMember">추가</button>
+      </div>
+      <p class="hint">기록에 쓰인 팀원은 '숨기기'만 가능해요. 숨겨도 지난 기록은 그대로 남아요.</p>
+    </div>
+
+    <div class="card">
+      <div class="label">입금 계좌 (정산 메시지에 표시)</div>
+      <input type="text" id="sAccount" placeholder="예: 국민 123456-01-234567 박현수">
+    </div>
+
+    <div class="card">
+      <div class="label">1/N 끝전 처리</div>
+      <div class="seg" id="sRound">
+        <button data-v="none">1원 단위</button>
+        <button data-v="up100">100원 올림</button>
+        <button data-v="down100">100원 내림</button>
+      </div>
+      <p class="hint">남는 금액은 내 몫에서 맞춰져요. 올림이면 팀원이, 내림이면 내가 조금 더 부담해요. (이미 저장한 기록에는 적용되지 않아요)</p>
+    </div>
+
+    <div class="card">
+      <div class="label">데이터 백업</div>
+      <div class="btnrow">
+        <button class="btn small" id="exportBtn">백업 파일 저장</button>
+        <button class="btn small" id="importBtn">백업 불러오기</button>
+      </div>
+      <input type="file" id="importFile" accept="application/json,.json" hidden>
+      <p class="hint">기록은 지금 쓰는 휴대폰 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니, 가끔 백업 파일을 저장해 두세요.</p>
+      <p class="hint"><button class="linkbtn danger" id="resetBtn">전체 초기화</button></p>
+    </div>
+  </section>
+</main>
+
+<!-- 저장 버튼 (기록 탭에서만 보임) -->
+<div class="sticky-action" id="saveBar">
+  <div class="inner"><button class="btn primary" id="saveBtn">저장</button></div>
+</div>
+
+<!-- 하단 탭바 -->
+<nav class="bottomnav">
+  <div class="inner">
+    <button class="navbtn" data-tab="record">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>기록
+    </button>
+    <button class="navbtn" data-tab="list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>내역
+    </button>
+    <button class="navbtn" data-tab="settle">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>정산
+    </button>
+    <button class="navbtn" data-tab="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>설정
+    </button>
+  </div>
+</nav>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>
