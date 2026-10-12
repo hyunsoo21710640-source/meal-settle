@@ -112,6 +112,24 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .sticky-action .inner { max-width: 448px; margin: 0 auto; }
 .sticky-action .btn { min-height: 52px; font-size: 17px; }
 
+/* 지역상품권 할인 (할인 표시는 초록 --ok 계열) */
+.vcard { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; position: relative; }
+.vcard input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.vbox {
+  flex: none; width: 24px; height: 24px; margin-top: 1px; border-radius: 7px;
+  border: 1.5px solid var(--border); background: var(--card); color: transparent; display: grid; place-items: center;
+}
+.vbox svg { width: 15px; height: 15px; }
+.vcard input:focus-visible + .vbox { outline: 2px solid var(--ok); outline-offset: 2px; }
+.vtitle { font-weight: 700; font-size: 15px; }
+.vcard .sub { display: block; margin-top: 2px; }
+.vcard.on { background: var(--ok-weak); border-color: #bfdcc8; }
+.vcard.on .vbox { background: var(--ok); border-color: var(--ok); color: #fff; }
+.vcard.on .sub { color: var(--ok); }
+.pv-disc { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; padding: 8px 12px; margin-bottom: 8px; border-radius: 10px; background: var(--ok-weak); color: var(--ok); }
+.pv-disc.plain { margin-top: -6px; padding-top: 0; background: none; color: var(--sub); font-weight: 500; }
+s { color: var(--sub); font-weight: 400; font-size: .82em; margin-right: 4px; }
+
 /* ================= 내역 탭 ================= */
 .date-head { font-size: 13px; font-weight: 700; color: var(--sub); margin: 18px 4px 8px; }
 .meal-top { display: flex; align-items: center; gap: 8px; }
@@ -130,12 +148,14 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .badge.ok { background: var(--ok-weak); color: var(--ok); }
 .badge.wait { background: var(--seg); color: var(--sub); }
 .badge.part { background: var(--accent-weak); color: var(--accent); }
+.badge.voucher { background: var(--ok-weak); color: var(--ok); }
 .empty { text-align: center; color: var(--sub); padding: 48px 16px; font-size: 15px; }
 
 /* ================= 정산 탭 ================= */
 .hero { background: linear-gradient(135deg, #d4531a, var(--accent)); border: 0; color: var(--on-accent); }
 .hero .sub { color: inherit; font-weight: 500; }
 .big { font-family: var(--display); font-size: 36px; font-weight: 400; line-height: 1.2; margin: 2px 0 4px; }
+.save-line { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.3); font-size: 13px; font-weight: 500; }
 .person { border-top: 1px solid var(--line); padding: 12px 0; }
 .person:first-of-type { border-top: 0; padding-top: 0; }
 .person-line { display: flex; align-items: center; gap: 10px; }
@@ -145,6 +165,7 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .person-detail { margin-top: 8px; background: var(--input); border-radius: 12px; padding: 8px 12px; }
 .drow { display: flex; justify-content: space-between; gap: 8px; font-size: 14px; padding: 3px 0; }
 .drow span:first-child { color: var(--sub); }
+.vtag { font-style: normal; font-size: 11px; font-weight: 700; color: var(--ok); background: var(--ok-weak); border-radius: 6px; padding: 1px 5px; margin-left: 4px; }
 .msg {
   white-space: pre-wrap; word-break: keep-all; background: var(--input); color: var(--text);
   border-radius: 14px; padding: 14px 16px; font-size: 14px; margin: 0 0 12px; font-family: inherit; line-height: 1.6;

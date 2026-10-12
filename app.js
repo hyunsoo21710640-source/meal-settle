@@ -4,8 +4,9 @@
    - 구조
      state.members : [{ id, name, active }]  ← id 'me' 는 결제자(나)
      state.meals   : [{ id, date, type, place, split, participants,
-                        items, common, total, shares, paid, memo, createdAt }]
-        · shares : { 팀원id: 부담금액 }
+                        items, common, total, shares, paid, memo, createdAt, voucher? }]
+        · shares : { 팀원id: 부담금액 }  ← 상품권 할인이 있으면 할인 후 금액
+        · voucher: { rate, gross, grossShares }  ← 지역상품권 할인 기록(할인율, 할인 전 총액·부담액)
         · paid   : { 팀원id: 입금확인 시각(timestamp) }  ← 없으면 미입금
    ===================================================================== */
 
@@ -17,6 +18,7 @@ function defaultState() {
     members: [{ id: 'me', name: '나', active: true }],
     account: '',
     rounding: 'none',          // none | up100 | down100
+    voucherRate: 10,           // 지역상품권 할인율(%)
     meals: [],
     lastParticipants: ['me'],
     includeDetail: false,
@@ -120,6 +122,27 @@ function calcShares(f) {
   return shares;
 }
 
+// 지역상품권 할인: 각자 몫을 rate%만큼 줄임. 끝전은 내 몫에서 조정(내가 없으면 앞사람부터 1원씩)
+function applyVoucher(gross, ids, rate) {
+  const netTotal = Math.round(sum(gross) * (100 - rate) / 100);
+  const out = {};
+  ids.forEach(id => (out[id] = Math.floor((gross[id] || 0) * (100 - rate) / 100)));
+  let rem = netTotal - sum(out);
+  if (ids.includes('me')) out.me += rem;
+  else ids.forEach(id => { if (rem > 0) { out[id]++; rem--; } });
+  return out;
+}
+
+// 저장·미리보기에 쓰는 최종 부담액. 상품권이면 할인 전 금액도 함께 돌려줌
+function finalShares(f) {
+  const shares = calcShares(f);
+  if (!f.voucher) return { shares, voucher: null };
+  const rate = f.voucherRate ?? state.voucherRate;
+  return { shares: applyVoucher(shares, ordered(f.participants), rate), voucher: { rate, gross: sum(shares), grossShares: shares } };
+}
+// 상품권으로 줄어든 금액
+const voucherSaved = (m, id) => (m.voucher ? (m.voucher.grossShares[id] || 0) - (m.shares[id] || 0) : 0);
+
 const isPaid = (m, id) => !!(m.paid && m.paid[id]);
 // 내 몫을 제외한 모든 사람이 입금했으면 정산 완료
 const isDone = m => m.participants.every(id => id === 'me' || !(m.shares[id] > 0) || isPaid(m, id));
@@ -173,6 +196,7 @@ function blankForm(keep = {}) {
     split: (keep.type || '점심') === '회식' ? 'equal' : 'individual',
     participants: ['me'],
     total: 0, items: {}, common: 0, memo: '',
+    voucher: false, voucherRate: null,   // voucherRate: 수정 중인 기록의 할인율(새 기록은 설정값)
   };
 }
 let form = blankForm();
@@ -185,6 +209,7 @@ function renderRecord() {
   $('#fTotal').value = form.total ? fmt(form.total) : '';
   $('#fCommon').value = form.common ? fmt(form.common) : '';
   $('#fMemo').value = form.memo;
+  renderVoucher();
   $('#editBanner').hidden = !form.editId;
   $('#saveBtn').textContent = form.editId ? '수정 완료' : '저장';
 
@@ -243,9 +268,15 @@ function renderFillLast() {
   if (last) btn.textContent = `지난번(${fmtDate(last.date)}) 금액 불러오기`;
 }
 
+function renderVoucher() {
+  $('#fVoucher').checked = form.voucher;
+  $('#vCard').classList.toggle('on', form.voucher);
+  $('#vSub').textContent = `모두의 몫에서 ${form.voucherRate ?? state.voucherRate}% 빼고 정산해요`;
+}
+
 function renderPreview() {
   const ids = ordered(form.participants);
-  const shares = calcShares(form);
+  const { shares, voucher } = finalShares(form);
   const total = sum(shares);
   const box = $('#preview');
   if (!ids.length || !total) {
@@ -255,10 +286,12 @@ function renderPreview() {
   const mine = shares.me || 0;
   box.innerHTML = `
     <div class="pv-head">
-      <span class="sub">총 ${won(total)} · ${ids.length}명</span>
+      <span class="sub">총 ${won(voucher ? voucher.gross : total)} · ${ids.length}명</span>
       <b>받을 돈 ${won(total - mine)}</b>
     </div>
-    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}</span><span>${won(shares[id])}</span></div>`).join('')}
+    ${voucher ? `<div class="pv-disc"><span>상품권 ${voucher.rate}% 할인</span><span>−${won(voucher.gross - total)}</span></div>
+      <div class="pv-disc plain"><span>실제 결제</span><span>${won(total)}</span></div>` : ''}
+    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
   `;
 }
 
@@ -273,6 +306,7 @@ $('#fType').addEventListener('click', e => {
 });
 $('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); });
 $('#fMemo').addEventListener('input', e => (form.memo = e.target.value));
+$('#fVoucher').addEventListener('change', e => { form.voucher = e.target.checked; renderVoucher(); renderPreview(); });
 
 $('#fPeople').addEventListener('click', e => {
   const id = e.target.closest('.chip')?.dataset.id; if (!id) return;
@@ -336,7 +370,7 @@ $('#saveBtn').addEventListener('click', saveMeal);
 function saveMeal() {
   const ids = ordered(form.participants);
   if (!ids.length) return toast('참석자를 선택해 주세요');
-  const shares = calcShares(form);
+  const { shares, voucher } = finalShares(form);
   const total = sum(shares);
   if (total <= 0) return toast('금액을 입력해 주세요');
   if (form.split === 'individual') {
@@ -357,6 +391,7 @@ function saveMeal() {
     memo: form.memo.trim(),
     createdAt: Date.now(),
   };
+  if (voucher) meal.voucher = voucher;
 
   const wasEdit = !!form.editId;
   if (wasEdit) {
@@ -410,12 +445,13 @@ function mealCard(m) {
       <div class="meal-top">
         <span class="badge ${m.type === '회식' ? 'dinner' : 'lunch'}">${esc(m.type)}</span>
         <b class="meal-place">${esc(m.place || '(식당 미입력)')}</b>
-        <span class="meal-total">${won(m.total)}</span>
+        <span class="meal-total">${m.voucher ? `<s>${fmt(m.voucher.gross)}</s>` : ''}${won(m.total)}</span>
       </div>
       ${m.memo ? `<div class="meal-memo">${esc(m.memo)}</div>` : ''}
       <div class="shares">${shares}</div>
       <div class="meal-foot">
         ${status}
+        ${m.voucher ? `<span class="badge voucher">상품권 ${m.voucher.rate}% 할인</span>` : ''}
         <span class="spacer"></span>
         ${anyPaid ? '<span class="sub">입금 반영됨</span>' : '<button class="linkbtn" data-act="edit">수정</button>'}
         <button class="linkbtn danger" data-act="del">삭제</button>
@@ -437,8 +473,9 @@ $('#listBody').addEventListener('click', e => {
     form = {
       editId: m.id, date: m.date, type: m.type, place: m.place, split: m.split,
       participants: [...m.participants],
-      total: m.split === 'equal' ? m.total : 0,
+      total: m.split === 'equal' ? (m.voucher ? m.voucher.gross : m.total) : 0,
       items: { ...m.items }, common: m.common || 0, memo: m.memo || '',
+      voucher: !!m.voucher, voucherRate: m.voucher ? m.voucher.rate : null,
     };
     showTab('record');
   }
@@ -473,6 +510,12 @@ function buildMessage(per, ids) {
     lines.push(`${nameOf(id)} ${won(p.amt)}${hasOld ? ' (지난 미입금 포함)' : ''}`);
     if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${x.m.place || x.m.type} ${won(x.amt)}`));
   });
+  const vMeals = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m)))].filter(m => m.voucher)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+  if (vMeals.length) {
+    lines.push('');
+    vMeals.forEach(m => lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% 할인 적용`));
+  }
   if (state.account) lines.push('', `입금 계좌: ${state.account}`);
   return lines.join('\n');
 }
@@ -495,6 +538,7 @@ function renderSettle() {
   const mealCount = new Set(ids.flatMap(id => per[id].items.map(x => x.m.id))).size;
   const msg = buildMessage(per, ids);
   const batches = paidBatches();
+  const saved = ids.reduce((a, id) => a + per[id].items.reduce((b, x) => b + voucherSaved(x.m, id), 0), 0);
   const canShare = !!navigator.share;
   let html = '';
 
@@ -504,6 +548,7 @@ function renderSettle() {
       <div class="sub">아직 받을 돈</div>
       <div class="big">${won(total)}</div>
       <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명` : '모두 정산됐어요'}</div>
+      ${saved ? `<div class="save-line">지역상품권으로 팀원 몫 ${won(saved)} 할인됐어요</div>` : ''}
     </div>`;
 
   // 사람별
@@ -522,7 +567,7 @@ function renderSettle() {
             <button class="btn small ok" data-act="paid">입금 확인</button>
           </div>
           <div class="person-detail" ${open ? '' : 'hidden'}>
-            ${p.items.map(x => `<div class="drow"><span>${fmtDate(x.m.date)} ${esc(x.m.place || x.m.type)}</span><span>${won(x.amt)}</span></div>`).join('')}
+            ${p.items.map(x => `<div class="drow"><span>${fmtDate(x.m.date)} ${esc(x.m.place || x.m.type)}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
           </div>
         </div>`;
     });
@@ -618,6 +663,7 @@ function renderSettings() {
   $('#sMe').value = nameOf('me') === '나' ? '' : nameOf('me');
   $('#sAccount').value = state.account;
   setSeg('#sRound', state.rounding);
+  $('#sVoucher').value = state.voucherRate;
   if (!$('#xFrom').value) $('#xFrom').value = todayStr().slice(0, 8) + '01';   // 기본: 이번 달 1일 ~ 오늘
   if (!$('#xTo').value) $('#xTo').value = todayStr();
   renderXlsxHint();
@@ -639,6 +685,13 @@ $('#sAccount').addEventListener('change', e => { state.account = e.target.value.
 $('#sRound').addEventListener('click', e => {
   const v = e.target.closest('button')?.dataset.v; if (!v) return;
   state.rounding = v; saveState(); setSeg('#sRound', v);
+});
+
+$('#sVoucher').addEventListener('change', e => {
+  const v = toNum(e.target.value);
+  if (v < 1 || v > 50) { e.target.value = state.voucherRate; return toast('할인율은 1~50% 사이로 넣어 주세요'); }
+  state.voucherRate = v; e.target.value = v; saveState();
+  toast(`지역상품권 할인율을 ${v}%로 바꿨어요`);
 });
 
 function addMember() {
@@ -697,7 +750,7 @@ function exportSheets(meals) {
     const mine = m.shares.me || 0, paid = paidSum(m), toGet = m.total - mine;
     return [m.date, dow(m.date), m.type, m.place, m.split === 'equal' ? '1/N' : '개별 금액',
       m.participants.length, ordered(m.participants).map(nameOf).join(', '),
-      m.total, mine, toGet, paid, toGet - paid,
+      m.total, m.voucher ? m.voucher.gross - m.total : 0, mine, toGet, paid, toGet - paid,
       isDone(m) ? '정산 완료' : paid ? '일부 입금' : '미정산', m.memo || ''];
   });
   const col = i => mealRows.reduce((a, r) => a + r[i], 0);
@@ -721,10 +774,10 @@ function exportSheets(meals) {
   const others = personIdsAll.filter(id => id !== 'me');
 
   return [
-    { name: '식사별', cols: [12, 6, 7, 18, 10, 6, 30, 11, 11, 11, 11, 11, 10, 20], rows: [
-      ['날짜', '요일', '구분', '식당', '나누는 방식', '인원', '참석자', '총액', '내 부담', '받을 돈', '입금 받은 돈', '미입금', '상태', '메모'].map(H),
+    { name: '식사별', cols: [12, 6, 7, 18, 10, 6, 30, 11, 11, 11, 11, 11, 11, 10, 20], rows: [
+      ['날짜', '요일', '구분', '식당', '나누는 방식', '인원', '참석자', '총액', '상품권 할인', '내 부담', '받을 돈', '입금 받은 돈', '미입금', '상태', '메모'].map(H),
       ...mealRows,
-      [B('합계'), '', '', '', '', '', '', B(col(7)), B(col(8)), B(col(9)), B(col(10)), B(col(11))],
+      [B('합계'), '', '', '', '', '', '', B(col(7)), B(col(8)), B(col(9)), B(col(10)), B(col(11)), B(col(12))],
     ] },
     { name: '사람별 상세', cols: [12, 6, 7, 18, 16, 11, 10, 12], rows: [
       ['날짜', '요일', '구분', '식당', '이름', '부담액', '입금 상태', '입금 확인일'].map(H),
