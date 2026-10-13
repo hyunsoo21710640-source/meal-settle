@@ -179,7 +179,7 @@ function outstanding() {
 }
 
 /* ===================== 탭 전환 ===================== */
-const TAB_TITLES = { record: '오늘 뭐 먹었어요?', list: '먹은 기록', settle: '정산', settings: '설정' };
+const TAB_TITLES = { home: '이번 주 식대', record: '오늘 뭐 먹었어요?', list: '먹은 기록', settle: '정산', settings: '설정' };
 let currentTab = 'record';
 
 function showTab(tab) {
@@ -189,7 +189,7 @@ function showTab(tab) {
   $$('.navbtn').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#pageTitle').textContent = TAB_TITLES[tab];
   $('#saveBar').hidden = tab !== 'record';
-  ({ record: renderRecord, list: renderList, settle: renderSettle, settings: renderSettings })[tab]();
+  ({ home: renderHome, record: renderRecord, list: renderList, settle: renderSettle, settings: renderSettings })[tab]();
   renderTop();
   window.scrollTo(0, 0);
 }
@@ -198,10 +198,305 @@ $$('.navbtn').forEach(b => b.addEventListener('click', () => showTab(b.dataset.t
 function renderTop() {
   const total = sum(Object.fromEntries(Object.entries(outstanding()).map(([k, v]) => [k, v.amt])));
   const pill = $('#owePill');
-  pill.hidden = !total || currentTab === 'settle';
+  pill.hidden = !total || currentTab === 'settle' || currentTab === 'home';
   pill.textContent = `받을 돈 ${won(total)}`;
 }
 $('#owePill').addEventListener('click', () => showTab('settle'));
+
+/* ===================== ⓪ 홈 탭 (대시보드) =====================
+   - 점심 평균은 회식을 빼고 계산, 회식은 따로 표시
+   - 금액은 실제 결제액(meal.total, 상품권 할인 반영)
+   - 그래프 카드 3장(요일별 비교 / 8주 분석 / 달력)을 탭·밀기로 넘김 */
+const addDays = (s, n) => { const d = parseDate(s); d.setDate(d.getDate() + n); return dateStr(d); };
+const md = s => { const d = parseDate(s); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const man = n => `${(n / 10000).toFixed(1)}만`;
+const ICONS = {
+  record: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  settle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20M6 15h4"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
+};
+const DINNER_C = '#2563b0';
+const PIE_COLORS = ['#c9450e', '#159a6b', '#8f5bd6', '#2563b0', '#b7a38d'];   // 색약 검사 통과 4색 + 기타 회색
+
+const home = { cmp: 'last', panel: 0, week: 7, pie: 'place', slice: null, day: null, month: null };
+
+// 한 주(월~일) 통계. 점심만 평균에 넣음
+function weekStats(mon) {
+  const end = addDays(mon, 6);
+  const meals = state.meals.filter(m => m.date >= mon && m.date <= end);
+  const lunch = meals.filter(m => m.type !== '회식');
+  const total = lunch.reduce((a, m) => a + m.total, 0);
+  const days = new Set(lunch.map(m => m.date)).size;
+  const people = lunch.reduce((a, m) => a + m.participants.length, 0);
+  return {
+    total, days,
+    dailyAvg: days ? total / days : 0, perAvg: people ? total / people : 0,
+    byDay: [0, 1, 2, 3, 4].map(i => lunch.filter(m => m.date === addDays(mon, i)).reduce((a, m) => a + m.total, 0)),
+    dinnerDays: [0, 1, 2, 3, 4].map(i => meals.some(m => m.type === '회식' && m.date === addDays(mon, i))),
+    dinnerTotal: meals.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0),
+  };
+}
+// 비교 기준: 지난주, 또는 기록이 있는 최근 4주 평균
+function baseStats(mon) {
+  if (home.cmp === 'last') return { label: '지난주', ...weekStats(addDays(mon, -7)) };
+  const ws = [1, 2, 3, 4].map(k => weekStats(addDays(mon, -7 * k))).filter(w => w.total);
+  const avg = f => (ws.length ? ws.reduce((a, w) => a + f(w), 0) / ws.length : 0);
+  return { label: '4주 평균', dailyAvg: avg(w => w.dailyAvg), perAvg: avg(w => w.perAvg), byDay: [0, 1, 2, 3, 4].map(i => avg(w => w.byDay[i])) };
+}
+const chg = (now, base) => {
+  if (!base || !now) return '';
+  const p = (now - base) / base * 100;
+  return `<span class="chg ${p > 0 ? 'up' : p < 0 ? 'down' : ''}">${p > 0 ? '▲' : p < 0 ? '▼' : ''} ${Math.abs(p).toFixed(1)}%</span>`;
+};
+
+function renderHome() {
+  const mon = mondayOf(todayStr());
+  const now = weekStats(mon), base = baseStats(mon);
+  const per = outstanding(), ids = personIds(per);
+  const owe = ids.reduce((a, id) => a + per[id].amt, 0);
+  const oweMeals = new Set(ids.flatMap(id => per[id].items.map(x => x.m.id))).size;
+  let html = '';
+
+  // 받을 돈 + 바로가기
+  html += owe
+    ? `<button class="card hero home-hero" data-go="settle"><span class="sub">아직 받을 돈</span><span class="big">${won(owe)}</span><span class="sub">미입금 ${ids.length}명 · 기록 ${oweMeals}건</span></button>`
+    : `<div class="card"><div class="sub">아직 받을 돈</div><div class="big">0원</div><div class="sub">모두 정산됐어요</div></div>`;
+  html += `
+    <nav class="shortcuts" aria-label="바로가기">
+      <button data-go="record">${ICONS.record}기록하기</button>
+      <button data-go="settle">${ICONS.settle}정산하기${ids.length ? ` · ${ids.length}명` : ''}</button>
+      <button data-go="list">${ICONS.list}내역 보기</button>
+    </nav>`;
+
+  // 비교 기준 + 점심 하루 평균
+  html += `
+    <div class="seg home-seg" role="group" aria-label="비교 기준">
+      <button data-cmp="last" class="${home.cmp === 'last' ? 'on' : ''}">지난주와 비교</button>
+      <button data-cmp="avg" class="${home.cmp === 'avg' ? 'on' : ''}">최근 4주 평균과 비교</button>
+    </div>`;
+  if (now.total) {
+    const diff = now.dailyAvg - base.dailyAvg;
+    html += `
+      <div class="card avg-card">
+        <div class="label">점심 하루 평균 (회식 제외) · ${md(mon)}~${md(addDays(mon, 6))}</div>
+        <div class="avg-main"><span class="avg-num">${won(Math.round(now.dailyAvg))}</span>${chg(now.dailyAvg, base.dailyAvg)}</div>
+        <div class="sub">${base.dailyAvg ? `${base.label} ${won(Math.round(base.dailyAvg))}보다 ${won(Math.round(Math.abs(diff)))} ${diff >= 0 ? '더' : '덜'} 썼어요` : `비교할 ${base.label} 점심 기록이 없어요`}</div>
+        <div class="avg-sub"><span>1인 평균 <b>${won(Math.round(now.perAvg))}</b> ${chg(now.perAvg, base.perAvg)}</span><span>점심 <b>${now.days}일</b></span></div>
+      </div>`;
+  } else {
+    html += `<div class="card avg-card"><div class="label">점심 하루 평균 (회식 제외)</div><div class="sub">이번 주 점심 기록이 아직 없어요. <button class="linkbtn" data-go="record">기록하기 →</button></div></div>`;
+  }
+
+  // 그래프 카드
+  const tabs = ['요일별 비교', '8주 분석', `${monthLabel()} 달력`];
+  html += `
+    <section class="card carousel" aria-label="그래프">
+      <div class="ctabs" role="tablist">${tabs.map((t, i) => `<button role="tab" aria-selected="${i === home.panel}" data-panel="${i}" class="${i === home.panel ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <div class="cview"><div class="ctrack" style="transform: translateX(${-100 * home.panel}%)">
+        <div class="cpanel ${home.panel === 0 ? 'on' : ''}" aria-hidden="${home.panel !== 0}">${panelCompare(now, base, mon)}</div>
+        <div class="cpanel ${home.panel === 1 ? 'on' : ''}" aria-hidden="${home.panel !== 1}">${panelTrend(mon)}</div>
+        <div class="cpanel ${home.panel === 2 ? 'on' : ''}" aria-hidden="${home.panel !== 2}">${panelCalendar()}</div>
+      </div></div>
+      <div class="dots" aria-hidden="true">${tabs.map((_, i) => `<span class="${i === home.panel ? 'on' : ''}"></span>`).join('')}<em>${home.panel < 2 ? '← 밀거나 탭을 눌러 다음 그래프' : '→ 밀어서 이전 그래프'}</em></div>
+    </section>`;
+
+  // 회식 카드 (평균과 따로)
+  const last = weekStats(addDays(mon, -7));
+  const month = todayStr().slice(0, 7);
+  const mDinner = state.meals.filter(m => m.type === '회식' && m.date.startsWith(month));
+  const dMax = Math.max(now.dinnerTotal, last.dinnerTotal, 1);
+  html += `
+    <section class="card dinner-card">
+      <div class="label"><span>회식은 따로 봐요</span><span>이번 달 ${mDinner.length}회 · ${won(mDinner.reduce((a, m) => a + m.total, 0))}</span></div>
+      <div class="dbar"><span>이번 주</span><i style="width:${now.dinnerTotal / dMax * 100}%"></i><b>${won(now.dinnerTotal)}</b></div>
+      <div class="dbar"><span>지난주</span><i class="light" style="width:${last.dinnerTotal / dMax * 100}%"></i><b>${won(last.dinnerTotal)}</b></div>
+    </section>`;
+
+  $('#homeBody').innerHTML = html;
+}
+
+// ① 요일별 비교: 이번 주 vs 비교 기준, 막대 위는 차이(천 원)
+function panelCompare(now, base, mon) {
+  const max = Math.max(...now.byDay, ...base.byDay, 1);
+  const cols = DOW.slice(1, 6).map((dow, i) => {
+    const n = now.byDay[i], b = base.byDay[i], d = Math.round((n - b) / 100) / 10;
+    const future = addDays(mon, i) > todayStr();   // 아직 안 온 요일은 차이를 표시하지 않음
+    const label = !future && (n || b) ? (d > 0 ? '+' : '') + d : '';
+    return `<div class="bcol">
+      <span class="bdelta ${d > 0 ? 'up' : d < 0 ? 'down' : ''}">${label}</span>
+      <div class="bpair"><i class="now" style="height:${n / max * 130}px"></i><i class="base" style="height:${b / max * 130}px"></i></div>
+      <span class="bdow">${dow}</span>${now.dinnerDays[i] ? '<span class="dtag">회식</span>' : ''}
+    </div>`;
+  }).join('');
+  return `
+    <div class="legend"><span><i class="now"></i>이번 주</span><span><i class="base"></i>${base.label}</span></div>
+    <div class="bars">${cols}</div>
+    <p class="hint">막대 위 숫자는 ${base.label} 대비 차이(천 원)예요. 회식은 넣지 않았어요.</p>`;
+}
+
+// ② 8주 분석: 주별 점심 1인 평균 선 + 8주 식비 구성 도넛
+function panelTrend(mon) {
+  const mons = [7, 6, 5, 4, 3, 2, 1, 0].map(k => addDays(mon, -7 * k));
+  const ws = mons.map(weekStats);
+  const vals = ws.map(w => (w.total ? w.perAvg : null));
+  const got = vals.filter(v => v != null);
+  let line = '<p class="hint">8주 동안 점심 기록이 없어요.</p>';
+  if (got.length) {
+    let lo = Math.min(...got), hi = Math.max(...got);
+    if (hi - lo < 1000) { lo -= 500; hi += 500; }
+    const x = i => 24 + (302 / 8) * (i + 0.5), y = v => 130 - (v - lo) / (hi - lo) * 110;
+    const pts = vals.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(' ');
+    const sw = home.week, sv = vals[sw];
+    line = `
+      <div class="readout"><b>${md(mons[sw])} 주</b><span>점심 1인 <b>${sv == null ? '기록 없음' : won(Math.round(sv))}</b> · 회식 <b class="dc">${ws[sw].dinnerTotal ? won(ws[sw].dinnerTotal) : '없음'}</b></span></div>
+      <div class="line-wrap">
+        <svg viewBox="0 0 326 150" role="img" aria-label="최근 8주 점심 1인 평균 추이">
+          <line x1="0" y1="20" x2="326" y2="20" class="grid"/><line x1="0" y1="75" x2="326" y2="75" class="grid"/><line x1="0" y1="130" x2="326" y2="130" class="axis"/>
+          <text x="0" y="14">${fmt(Math.round(hi))}</text><text x="0" y="126">${fmt(Math.round(lo))}</text>
+          <line x1="${x(sw)}" y1="10" x2="${x(sw)}" y2="130" class="guide"/>
+          <polyline points="${pts}" class="trend"/>
+          ${vals.map((v, i) => (v == null ? '' : `<circle cx="${x(i)}" cy="${y(v)}" r="${i === sw ? 5 : 3}" class="${i === sw ? 'sel' : 'pt'}"/>`)).join('')}
+        </svg>
+        <div class="week-hits">${mons.map((m, i) => `<button data-week="${i}" aria-label="${md(m)} 주 상세 보기"></button>`).join('')}</div>
+      </div>
+      <div class="week-labels">${mons.map(m => `<span>${md(m)}</span>`).join('')}</div>`;
+  }
+  return `<h3 class="ptitle">주별 점심 1인 평균 <span class="sub">주를 누르면 상세</span></h3>${line}${donut(mons[0], addDays(mon, 6))}`;
+}
+
+function donut(from, to) {
+  const meals = state.meals.filter(m => m.date >= from && m.date <= to);
+  const lunch = meals.filter(m => m.type !== '회식');
+  const top = (map, restLabel) => {
+    const arr = Object.entries(map).sort((a, b) => b[1] - a[1]);
+    const head = arr.slice(0, 4), rest = arr.slice(4);
+    if (rest.length) head.push([restLabel(rest), rest.reduce((a, r) => a + r[1], 0)]);
+    return head;
+  };
+  const byPlace = {}, byPerson = {};
+  lunch.forEach(m => {
+    const k = m.place || m.type;
+    byPlace[k] = (byPlace[k] || 0) + m.total;
+    m.participants.forEach(id => (byPerson[id] = (byPerson[id] || 0) + (m.shares[id] || 0)));
+  });
+  const MODES = {
+    place: { name: '식당별', note: '점심만 (회식 제외) · 상위 4곳 + 기타',
+      items: top(byPlace, r => `기타 (${r.slice(0, 2).map(x => x[0]).join('·')}${r.length > 2 ? ' 등' : ''})`) },
+    person: { name: '사람별', note: '점심만 (회식 제외) · 각자 부담한 금액',
+      items: top(byPerson, r => `그 외 ${r.length}명`).map(([k, v]) => [member(k) ? label(k) : k, v]) },
+    kind: { name: '점심·회식', note: '회식이 전체 식비에서 차지하는 비중',
+      items: [['점심', lunch.reduce((a, m) => a + m.total, 0)], ['회식', meals.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0)]].filter(x => x[1]) },
+  };
+  const mode = MODES[home.pie], items = mode.items, total = items.reduce((a, x) => a + x[1], 0);
+  const colors = home.pie === 'kind' ? (items.length === 2 ? ['#c9450e', DINNER_C] : [items[0]?.[0] === '회식' ? DINNER_C : '#c9450e']) : PIE_COLORS;
+  const seg = `<div class="seg pie-seg" role="group" aria-label="구성 기준">${Object.entries(MODES).map(([k, v]) => `<button data-pie="${k}" class="${k === home.pie ? 'on' : ''}">${v.name}</button>`).join('')}</div>`;
+  const head = `<h3 class="ptitle sep">최근 8주 식비 구성 <span class="sub">${md(from)} ~ ${md(to)}</span></h3>`;
+  if (!total) return head + seg + '<p class="hint">이 기간에 기록이 없어요.</p>';
+
+  const C = 2 * Math.PI * 66, sel = home.slice != null && home.slice < items.length ? home.slice : null;
+  let cum = 0;
+  const arcs = items.map(([, v], i) => {
+    const f = v / total, len = Math.max(0, f * C - (items.length > 1 ? 2 : 0));
+    const a = `<circle cx="90" cy="90" r="66" stroke="${colors[i]}" stroke-width="${sel === i ? 32 : 26}" stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}" stroke-dashoffset="${(-cum * C).toFixed(2)}" opacity="${sel == null || sel === i ? 1 : 0.3}"/>`;
+    cum += f;
+    return a;
+  }).join('');
+  const pctOf = v => `${Math.round(v / total * 1000) / 10}%`;
+  // 가운데는 좁아서 만 원 단위로 줄여 씀 (정확한 금액은 아래 목록)
+  const c = sel == null ? ['합계', `${man(total)}원`, ''] : [items[sel][0], `${man(items[sel][1])}원`, pctOf(items[sel][1])];
+  return `${head}${seg}
+    <div class="donut">
+      <svg viewBox="0 0 180 180" role="img" aria-label="${mode.name} 구성: ${items.map(([k, v]) => `${k} ${pctOf(v)}`).join(', ')}">
+        <circle cx="90" cy="90" r="66" stroke="#f3e6d5" stroke-width="26"/><g transform="rotate(-90 90 90)">${arcs}</g>
+      </svg>
+      <div class="donut-center"><span>${esc(c[0])}</span><b>${c[1]}</b><span>${c[2]}</span></div>
+    </div>
+    <div class="pie-list">${items.map(([k, v], i) => `
+      <button data-slice="${i}" class="${sel === i ? 'on' : ''}" aria-pressed="${sel === i}">
+        <i style="background:${colors[i]}"></i><span>${esc(k)}</span><span>${won(v)}</span><b>${pctOf(v)}</b>
+      </button>`).join('')}</div>
+    <p class="hint">${mode.note}</p>`;
+}
+
+// ③ 달력: 월~금, 칸 = 날짜 + 점심값(만 원) + 막대. 누르면 그 줄 아래에 그날 내역 카드
+const monthLabel = () => `${Number((home.month || todayStr().slice(0, 7)).slice(5))}월`;
+function panelCalendar() {
+  const month = home.month || todayStr().slice(0, 7);
+  const first = month + '-01';
+  const lastDay = dateStr(new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0));
+  const inMonth = state.meals.filter(m => m.date.startsWith(month));
+  const lunchOf = d => inMonth.filter(m => m.date === d && m.type !== '회식').reduce((a, m) => a + m.total, 0);
+  const max = Math.max(1, ...inMonth.filter(m => m.type !== '회식').map(m => lunchOf(m.date)));
+  const weekend = inMonth.filter(m => [0, 6].includes(parseDate(m.date).getDay())).length;
+  let rows = '';
+  for (let mon = mondayOf(first); mon <= lastDay; mon = addDays(mon, 7)) {
+    const days = [0, 1, 2, 3, 4].map(i => addDays(mon, i));
+    rows += days.map(d => {
+      if (!d.startsWith(month)) return '<span class="cal-cell out"></span>';
+      const v = lunchOf(d), dinner = inMonth.some(m => m.date === d && m.type === '회식'), any = inMonth.some(m => m.date === d);
+      return `<button class="cal-cell ${home.day === d ? 'on' : ''} ${d === todayStr() ? 'today' : ''}" data-day="${d}" ${any ? '' : 'disabled'}
+        aria-label="${md(d)} ${v ? `점심 ${won(v)}` : '점심 기록 없음'}${dinner ? ', 회식 있음' : ''}" aria-pressed="${home.day === d}">
+        <span class="cd">${parseDate(d).getDate()}</span><span class="ca">${v ? man(v) : ''}</span>
+        <span class="cb"><i style="width:${v / max * 100}%"></i></span>${dinner ? '<span class="cdot"></span>' : ''}
+      </button>`;
+    }).join('');
+    if (home.day && days.includes(home.day)) rows += dayCard(home.day, days.indexOf(home.day));
+  }
+  return `
+    <div class="cal-head">
+      <button data-act="month-prev" aria-label="이전 달">‹</button><b>${month.slice(0, 4)}년 ${Number(month.slice(5))}월</b><button data-act="month-next" aria-label="다음 달">›</button>
+    </div>
+    <div class="cal-grid">${DOW.slice(1, 6).map(w => `<span class="cal-dow">${w}</span>`).join('')}${rows}</div>
+    <div class="legend cal-legend"><span><i class="bar"></i>막대 = 그날 점심값 (가장 많은 날 기준)</span><span><i class="dot"></i>회식한 날</span></div>
+    ${weekend ? `<p class="hint">주말 기록 ${weekend}건은 달력에 없어요. 내역에서 확인하세요.</p>` : '<p class="hint">날짜를 누르면 그날 내역이 작은 카드로 보여요.</p>'}`;
+}
+
+function dayCard(d, col) {
+  const meals = state.meals.filter(m => m.date === d).sort((a, b) => a.createdAt - b.createdAt);
+  return `<div class="cal-pop" role="region" aria-label="${md(d)} 내역">
+    <span class="arrow" style="left: calc(${col * 20 + 10}% - 6px)"></span>
+    <div class="cal-pop-head"><b>${fmtDate(d)} 내역 ${meals.length}건</b><button data-act="close-day" aria-label="닫기">✕</button></div>
+    ${meals.map(m => {
+      const n = m.participants.length;
+      return `<div class="cal-pop-row">
+        <span class="badge ${m.type === '회식' ? 'dinner-b' : 'lunch'}">${esc(m.type)}</span>
+        <div><div class="r1"><b>${esc(m.place || m.type)}</b><b>${won(m.total)}</b></div>
+        <span class="sub">${n}명 · 1인 ${won(Math.round(m.total / n))}${m.type === '회식' ? ' · 평균 제외' : ''}${m.voucher ? ` · 상품권 ${m.voucher.rate}%` : ''}</span></div>
+      </div>`;
+    }).join('')}
+    <button class="linkbtn" data-go="list">내역에서 보기 →</button>
+  </div>`;
+}
+
+$('#homeBody').addEventListener('click', e => {
+  const t = e.target.closest('button'); if (!t || t.disabled) return;
+  const d = t.dataset;
+  if (d.go) return showTab(d.go);
+  if (d.cmp) home.cmp = d.cmp;
+  else if (d.panel) home.panel = Number(d.panel);
+  else if (d.week) home.week = Number(d.week);
+  else if (d.pie) { home.pie = d.pie; home.slice = null; }
+  else if (d.slice) home.slice = home.slice === Number(d.slice) ? null : Number(d.slice);
+  else if (d.day) home.day = home.day === d.day ? null : d.day;
+  else if (d.act === 'close-day') home.day = null;
+  else if (d.act === 'month-prev' || d.act === 'month-next') {
+    const m = home.month || todayStr().slice(0, 7);
+    const dt = new Date(Number(m.slice(0, 4)), Number(m.slice(5)) - 1 + (d.act === 'month-next' ? 1 : -1), 1);
+    home.month = dateStr(dt).slice(0, 7); home.day = null;
+  } else return;
+  renderHome();
+});
+// 그래프 카드를 손가락·마우스로 40px 넘게 끌면 다음/이전 그래프
+let homeDragX = null;
+$('#homeBody').addEventListener('pointerdown', e => { if (e.target.closest('.cview')) homeDragX = e.clientX; });
+$('#homeBody').addEventListener('pointerup', e => {
+  if (homeDragX == null) return;
+  const dx = e.clientX - homeDragX; homeDragX = null;
+  if (Math.abs(dx) < 40) return;
+  const next = home.panel + (dx < 0 ? 1 : -1);
+  if (next < 0 || next > 2) return;
+  home.panel = next; renderHome();
+});
 
 /* ===================== ① 기록 탭 ===================== */
 function blankForm(keep = {}) {
@@ -1067,7 +1362,7 @@ $('#resetBtn').addEventListener('click', () => {
 });
 
 /* ===================== 시작 ===================== */
-showTab(state.members.length > 1 ? 'record' : 'settings');
+showTab(state.members.length > 1 ? 'home' : 'settings');
 
 // 앱 설치(PWA) · 오프라인 실행용 서비스워커. https 또는 localhost에서만 동작
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

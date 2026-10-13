@@ -25,6 +25,11 @@
 </header>
 
 <main>
+  <!-- ==================== ⓪ 홈 탭 (대시보드) ==================== -->
+  <section class="tab" id="tab-home" hidden>
+    <div id="homeBody"></div>
+  </section>
+
   <!-- ==================== ① 기록 탭 ==================== -->
   <section class="tab" id="tab-record">
     <div class="card edit-banner" id="editBanner" hidden>
@@ -212,6 +217,9 @@
 <!-- 하단 탭바 -->
 <nav class="bottomnav">
   <div class="inner">
+    <button class="navbtn" data-tab="home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>홈
+    </button>
     <button class="navbtn" data-tab="record">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>기록
     </button>
