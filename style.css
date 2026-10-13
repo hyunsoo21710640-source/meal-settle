@@ -213,10 +213,10 @@ s { color: var(--sub); font-weight: 400; font-size: .82em; margin-right: 4px; }
 .ctabs { display: flex; gap: 4px; padding: 10px 12px 0; }
 .ctabs button { flex: 1; border: 0; background: none; min-height: 40px; font-size: 14px; color: var(--sub); border-bottom: 2px solid transparent; white-space: nowrap; }
 .ctabs button.on { color: var(--text); font-weight: 700; border-bottom-color: var(--accent); }
-.cview { overflow: hidden; touch-action: pan-y; }
-.ctrack { display: flex; align-items: flex-start; transition: transform .3s ease; }
+.cview { overflow: hidden; touch-action: pan-y; transition: height .3s ease; }
+.ctrack { display: flex; align-items: flex-start; transition: transform .35s cubic-bezier(.2, .8, .2, 1); will-change: transform; }
 .cpanel { flex: 0 0 100%; min-width: 0; padding: 16px; }
-.cpanel:not(.on) { height: 0; padding-top: 0; padding-bottom: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) { .cview, .ctrack { transition: none; } }
 .dots { display: flex; justify-content: center; align-items: center; gap: 6px; padding: 0 0 14px; }
 .dots span { width: 6px; height: 6px; border-radius: 3px; background: var(--border); }
 .dots span.on { width: 18px; background: var(--accent); }

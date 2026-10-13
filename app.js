@@ -312,7 +312,12 @@ function renderHome() {
       <div class="dbar"><span>지난주</span><i class="light" style="width:${last.dinnerTotal / dMax * 100}%"></i><b>${won(last.dinnerTotal)}</b></div>
     </section>`;
 
+  // 다시 그려도 카드 높이가 이전 높이에서 부드럽게 바뀌도록 이전 높이부터 시작
+  const prevH = $('#homeBody .cview')?.offsetHeight;
   $('#homeBody').innerHTML = html;
+  const view = $('#homeBody .cview');
+  if (view && prevH) { view.style.height = prevH + 'px'; void view.offsetHeight; }
+  fitPanel();
 }
 
 // ① 요일별 비교: 이번 주 vs 비교 기준, 막대 위는 차이(천 원)
@@ -473,7 +478,7 @@ $('#homeBody').addEventListener('click', e => {
   const d = t.dataset;
   if (d.go) return showTab(d.go);
   if (d.cmp) home.cmp = d.cmp;
-  else if (d.panel) home.panel = Number(d.panel);
+  else if (d.panel) return setPanel(Number(d.panel));   // 다시 그리지 않고 옮겨야 애니메이션이 보임
   else if (d.week) home.week = Number(d.week);
   else if (d.pie) { home.pie = d.pie; home.slice = null; }
   else if (d.slice) home.slice = home.slice === Number(d.slice) ? null : Number(d.slice);
@@ -486,17 +491,66 @@ $('#homeBody').addEventListener('click', e => {
   } else return;
   renderHome();
 });
-// 그래프 카드를 손가락·마우스로 40px 넘게 끌면 다음/이전 그래프
-let homeDragX = null;
-$('#homeBody').addEventListener('pointerdown', e => { if (e.target.closest('.cview')) homeDragX = e.clientX; });
-$('#homeBody').addEventListener('pointerup', e => {
-  if (homeDragX == null) return;
-  const dx = e.clientX - homeDragX; homeDragX = null;
-  if (Math.abs(dx) < 40) return;
-  const next = home.panel + (dx < 0 ? 1 : -1);
-  if (next < 0 || next > 2) return;
-  home.panel = next; renderHome();
+// 그래프 카드 넘기기: 화면을 다시 그리지 않고 위치·탭·점·높이만 바꿈
+const HINTS = ['← 밀거나 탭을 눌러 다음 그래프', '← 밀거나 탭을 눌러 다음 그래프', '→ 밀어서 이전 그래프'];
+function setPanel(i) {
+  home.panel = i;
+  const root = $('#homeBody'), track = root.querySelector('.ctrack');
+  if (!track) return;
+  track.style.transition = '';
+  track.style.transform = `translateX(${-100 * i}%)`;
+  root.querySelectorAll('.ctabs button').forEach((b, k) => { b.classList.toggle('on', k === i); b.setAttribute('aria-selected', k === i); });
+  root.querySelectorAll('.cpanel').forEach((p, k) => p.setAttribute('aria-hidden', k !== i));
+  root.querySelectorAll('.dots span').forEach((s, k) => s.classList.toggle('on', k === i));
+  root.querySelector('.dots em').textContent = HINTS[i];
+  fitPanel();
+}
+// 카드 높이를 지금 보는 그래프에 맞춤 (CSS transition으로 부드럽게)
+function fitPanel() {
+  const view = $('#homeBody .cview');
+  const p = view && view.querySelectorAll('.cpanel')[home.panel];
+  if (p) view.style.height = p.offsetHeight + 'px';
+}
+
+// 손가락·마우스로 끌면 그래프가 따라오고, 놓으면 다음/이전/제자리로 미끄러짐
+let drag = null, swallowClick = false;
+$('#homeBody').addEventListener('pointerdown', e => {
+  const view = e.target.closest('.cview');
+  if (view) drag = { x: e.clientX, y: e.clientY, dx: 0, t: performance.now(), moved: false, view };
 });
+$('#homeBody').addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+  if (!drag.moved) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (Math.abs(dy) > Math.abs(dx)) { drag = null; return; }   // 세로로 움직이면 화면 스크롤에 맡김
+    drag.moved = true;
+    drag.view.setPointerCapture?.(e.pointerId);
+  }
+  drag.dx = dx;
+  const edge = (home.panel === 0 && dx > 0) || (home.panel === 2 && dx < 0);   // 처음·끝에서는 뻑뻑하게
+  const track = drag.view.querySelector('.ctrack');
+  track.style.transition = 'none';
+  track.style.transform = `translateX(calc(${-100 * home.panel}% + ${edge ? dx / 3 : dx}px))`;
+});
+function endDrag() {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.moved) return;
+  swallowClick = true;   // 끌다 놓을 때 버튼이 눌리지 않게
+  setTimeout(() => (swallowClick = false), 0);
+  const fast = Math.abs(d.dx) / (performance.now() - d.t) > 0.5 && Math.abs(d.dx) > 20;   // 짧게 튕기기
+  const far = Math.abs(d.dx) > d.view.clientWidth * 0.2;
+  let next = home.panel;
+  if ((fast || far) && d.dx < 0 && next < 2) next++;
+  if ((fast || far) && d.dx > 0 && next > 0) next--;
+  setPanel(next);
+}
+$('#homeBody').addEventListener('pointerup', endDrag);
+$('#homeBody').addEventListener('pointercancel', endDrag);
+$('#homeBody').addEventListener('click', e => {
+  if (swallowClick) { e.stopPropagation(); e.preventDefault(); swallowClick = false; }
+}, true);
 
 /* ===================== ① 기록 탭 ===================== */
 function blankForm(keep = {}) {
