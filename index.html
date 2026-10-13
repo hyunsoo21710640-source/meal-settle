@@ -75,6 +75,10 @@
           <input type="text" inputmode="numeric" pattern="[0-9]*" id="fTotal" placeholder="0">
           <span>원</span>
         </div>
+        <div class="label mt"><span>따로 정할 사람 <span class="sub">(누르면 금액 직접 입력, 나머지는 1/N)</span></span></div>
+        <div class="chips" id="fFixedPick"></div>
+        <div id="fixedRows"></div>
+        <p class="hint" id="fixedHint" hidden></p>
       </div>
 
       <div id="indivBox" class="mt">
@@ -82,6 +86,14 @@
           <span>각자 먹은 금액</span>
           <button class="linkbtn" id="fillLast" hidden>지난번 금액 불러오기</button>
         </div>
+        <div class="irow base-row">
+          <span class="iname">기본 금액</span>
+          <div class="amount-input sm">
+            <input type="text" inputmode="numeric" pattern="[0-9]*" id="fBase" placeholder="0">
+            <span>원</span>
+          </div>
+        </div>
+        <p class="hint base-hint">모두에게 같은 금액이 들어가요. 다른 사람만 아래에서 고쳐 쓰세요.</p>
         <div id="indivRows"></div>
         <div class="label mt">
           <span>공통 금액 <span class="sub">(사이드·음료 등, 1/N 추가)</span></span>

@@ -6,6 +6,7 @@
      state.meals   : [{ id, date, type, place, split, participants,
                         items, common, total, shares, paid, memo, createdAt, voucher? }]
         · shares : { 팀원id: 부담금액 }  ← 상품권 할인이 있으면 할인 후 금액
+        · base   : 개별 금액의 기본 금액(빈 칸에 들어간 값) / fixed: 1/N에서 따로 정한 { 팀원id: 금액 }
         · voucher: { rate, gross, grossShares }  ← 지역상품권 할인 기록(할인율, 할인 전 총액·부담액)
         · paid   : { 팀원id: 입금확인 시각(timestamp) }  ← 없으면 미입금
    ===================================================================== */
@@ -110,11 +111,22 @@ function splitEven(total, ids) {
   return out;
 }
 
+// 개별 금액: 직접 넣은 금액이 없으면 기본 금액
+const itemOf = (f, id) => f.items[id] || f.base || 0;
+// 1/N에서 금액을 따로 정한 참석자
+const fixedIds = f => ordered(f.participants).filter(id => f.fixed && id in f.fixed);
+const fixedSum = f => fixedIds(f).reduce((a, id) => a + (f.fixed[id] || 0), 0);
+
 function calcShares(f) {
   const ids = ordered(f.participants);
-  if (f.split === 'equal') return splitEven(f.total, ids);
+  if (f.split === 'equal') {
+    const fx = fixedIds(f);
+    const out = splitEven(Math.max(0, f.total - fixedSum(f)), ids.filter(id => !fx.includes(id)));
+    fx.forEach(id => (out[id] = f.fixed[id] || 0));
+    return out;
+  }
   const shares = {};
-  ids.forEach(id => (shares[id] = f.items[id] || 0));
+  ids.forEach(id => (shares[id] = itemOf(f, id)));
   if (f.common > 0) {
     const add = splitEven(f.common, ids);
     ids.forEach(id => (shares[id] += add[id]));
@@ -196,6 +208,7 @@ function blankForm(keep = {}) {
     split: (keep.type || '점심') === '회식' ? 'equal' : 'individual',
     participants: ['me'],
     total: 0, items: {}, common: 0, memo: '',
+    base: 0, fixed: {},
     voucher: false, voucherRate: null,   // voucherRate: 수정 중인 기록의 할인율(새 기록은 설정값)
   };
 }
@@ -208,6 +221,7 @@ function renderRecord() {
   setSeg('#fSplit', form.split);
   $('#fTotal').value = form.total ? fmt(form.total) : '';
   $('#fCommon').value = form.common ? fmt(form.common) : '';
+  $('#fBase').value = form.base ? fmt(form.base) : '';
   $('#fMemo').value = form.memo;
   renderVoucher();
   $('#editBanner').hidden = !form.editId;
@@ -235,6 +249,7 @@ function renderSplitBoxes() {
   $('#equalBox').hidden = form.split !== 'equal';
   $('#indivBox').hidden = form.split !== 'individual';
   if (form.split === 'individual') renderIndivRows();
+  else renderFixed();
   renderFillLast();
   renderPreview();
 }
@@ -246,11 +261,38 @@ function renderIndivRows() {
       <div class="irow">
         <span class="iname">${esc(label(id))}</span>
         <div class="amount-input sm">
-          <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.items[id] ? fmt(form.items[id]) : ''}" placeholder="0">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.items[id] ? fmt(form.items[id]) : ''}" placeholder="${form.base ? fmt(form.base) : '0'}">
           <span>원</span>
         </div>
       </div>`).join('')
     : `<p class="hint" style="margin:0 0 8px">참석자를 먼저 선택하세요.</p>`;
+}
+
+// 1/N: 따로 정할 사람 고르기 + 금액 칸
+function renderFixed() {
+  const ids = ordered(form.participants);
+  $('#fFixedPick').innerHTML = ids.map(id =>
+    `<button class="chip small ${id in form.fixed ? 'on' : ''}" data-id="${id}">${esc(label(id))}</button>`).join('');
+  $('#fixedRows').innerHTML = fixedIds(form).map(id => `
+    <div class="irow">
+      <span class="iname">${esc(label(id))}</span>
+      <div class="amount-input sm">
+        <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.fixed[id] ? fmt(form.fixed[id]) : ''}" placeholder="0">
+        <span>원</span>
+      </div>
+    </div>`).join('');
+  renderFixedHint();
+}
+function renderFixedHint() {
+  const fx = fixedIds(form), rest = ordered(form.participants).length - fx.length;
+  const hint = $('#fixedHint');
+  hint.hidden = !fx.length;
+  if (!fx.length) return;
+  const left = form.total - fixedSum(form);
+  hint.classList.toggle('danger', left < 0 || (!rest && left !== 0));
+  hint.textContent = left < 0 ? `따로 정한 금액이 총 결제액보다 ${won(-left)} 많아요.`
+    : !rest ? (left ? `모두 따로 정했다면 합계가 총 결제액과 같아야 해요. (${won(left)} 남음)` : '모두 따로 정했어요.')
+    : `나머지 ${rest}명이 ${won(left)}을 1/N로 나눠요.`;
 }
 
 // 같은 식당의 가장 최근 '개별 금액' 기록
@@ -291,7 +333,7 @@ function renderPreview() {
     </div>
     ${voucher ? `<div class="pv-disc"><span>상품권 ${voucher.rate}% 할인</span><span>−${won(voucher.gross - total)}</span></div>
       <div class="pv-disc plain"><span>실제 결제</span><span>${won(total)}</span></div>` : ''}
-    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
+    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}${form.split === 'equal' && id in form.fixed ? ' <span class="sub">따로</span>' : ''}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
   `;
 }
 
@@ -342,7 +384,25 @@ function bindAmount(input, onValue) {
     onValue(v);
   });
 }
-bindAmount($('#fTotal'), v => { form.total = v; renderPreview(); });
+bindAmount($('#fTotal'), v => { form.total = v; renderFixedHint(); renderPreview(); });
+bindAmount($('#fBase'), v => {
+  form.base = v;
+  $$('#indivRows input').forEach(i => (i.placeholder = v ? fmt(v) : '0'));   // 다시 그리지 않아 입력 중 커서 유지
+  renderPreview();
+});
+$('#fFixedPick').addEventListener('click', e => {
+  const id = e.target.closest('.chip')?.dataset.id; if (!id) return;
+  if (id in form.fixed) delete form.fixed[id]; else form.fixed[id] = 0;
+  renderFixed(); renderPreview();
+  if (id in form.fixed) $(`#fixedRows input[data-id="${id}"]`)?.focus();
+});
+$('#fixedRows').addEventListener('input', e => {
+  const input = e.target; if (!input.dataset.id) return;
+  const v = toNum(input.value);
+  input.value = v ? fmt(v) : '';
+  form.fixed[input.dataset.id] = v;
+  renderFixedHint(); renderPreview();
+});
 bindAmount($('#fCommon'), v => { form.common = v; renderPreview(); });
 $('#indivRows').addEventListener('input', e => {
   const input = e.target; if (!input.dataset.id) return;
@@ -373,8 +433,13 @@ function saveMeal() {
   const { shares, voucher } = finalShares(form);
   const total = sum(shares);
   if (total <= 0) return toast('금액을 입력해 주세요');
+  if (form.split === 'equal' && fixedIds(form).length) {
+    const left = form.total - fixedSum(form);
+    if (left < 0) return toast('따로 정한 금액이 총 결제액보다 많아요');
+    if (fixedIds(form).length === ids.length && left !== 0) return toast('따로 정한 금액의 합이 총 결제액과 달라요');
+  }
   if (form.split === 'individual') {
-    const empty = ids.filter(id => !form.items[id]);
+    const empty = ids.filter(id => !itemOf(form, id));
     if (empty.length && !confirm(`${empty.map(label).join(', ')}의 개별 금액이 비어 있어요. 그대로 저장할까요?`)) return;
   }
 
@@ -385,12 +450,14 @@ function saveMeal() {
     place: form.place.trim(),
     split: form.split,
     participants: ids,
-    items: form.split === 'individual' ? Object.fromEntries(ids.map(id => [id, form.items[id] || 0])) : {},
+    items: form.split === 'individual' ? Object.fromEntries(ids.map(id => [id, itemOf(form, id)])) : {},
     common: form.split === 'individual' ? form.common : 0,
     total, shares, paid: {},
     memo: form.memo.trim(),
     createdAt: Date.now(),
   };
+  if (form.split === 'individual' && form.base) meal.base = form.base;
+  if (form.split === 'equal' && fixedIds(form).length) meal.fixed = Object.fromEntries(fixedIds(form).map(id => [id, form.fixed[id] || 0]));
   if (voucher) meal.voucher = voucher;
 
   const wasEdit = !!form.editId;
@@ -474,7 +541,10 @@ $('#listBody').addEventListener('click', e => {
       editId: m.id, date: m.date, type: m.type, place: m.place, split: m.split,
       participants: [...m.participants],
       total: m.split === 'equal' ? (m.voucher ? m.voucher.gross : m.total) : 0,
-      items: { ...m.items }, common: m.common || 0, memo: m.memo || '',
+      // 기본 금액과 같은 칸은 비워 둬서 기본 금액을 바꾸면 함께 바뀌게 함
+      items: Object.fromEntries(Object.entries(m.items).filter(([, v]) => !m.base || v !== m.base)),
+      common: m.common || 0, memo: m.memo || '',
+      base: m.base || 0, fixed: { ...(m.fixed || {}) },
       voucher: !!m.voucher, voucherRate: m.voucher ? m.voucher.rate : null,
     };
     showTab('record');
@@ -873,7 +943,7 @@ function exportSheets(meals) {
 
   const mealRows = meals.map(m => {
     const mine = m.shares.me || 0, paid = paidSum(m), toGet = m.total - mine;
-    return [m.date, dow(m.date), m.type, m.place, m.split === 'equal' ? '1/N' : '개별 금액',
+    return [m.date, dow(m.date), m.type, m.place, m.split === 'equal' ? (m.fixed ? '1/N(일부 지정)' : '1/N') : '개별 금액',
       m.participants.length, ordered(m.participants).map(nameOf).join(', '),
       m.total, m.voucher ? m.voucher.gross - m.total : 0, mine, toGet, paid, toGet - paid,
       isDone(m) ? '정산 완료' : paid ? '일부 입금' : '미정산', m.memo || ''];

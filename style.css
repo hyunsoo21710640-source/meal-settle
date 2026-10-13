@@ -97,6 +97,11 @@ input::placeholder { color: var(--sub); opacity: .7; }
 
 /* ================= 기록 탭 ================= */
 .irow { display: grid; grid-template-columns: 1fr 150px; align-items: center; gap: 10px; margin-bottom: 8px; }
+.base-row .iname { color: var(--accent); font-weight: 700; }
+.base-hint { margin: -2px 0 12px; }
+.hint.danger { color: var(--danger); }
+.chip.small { padding: 5px 12px; min-height: 34px; font-size: 14px; }
+#fixedRows { margin-top: 10px; }
 .iname { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edit-banner { background: var(--warn-weak); color: var(--warn); display: flex; justify-content: space-between; align-items: center; font-weight: 700; font-size: 14px; }
 .pv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 10px; }
