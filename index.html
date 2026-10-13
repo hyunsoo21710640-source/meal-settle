@@ -86,14 +86,15 @@
           <span>각자 먹은 금액</span>
           <button class="linkbtn" id="fillLast" hidden>지난번 금액 불러오기</button>
         </div>
-        <div class="irow base-row">
-          <span class="iname">기본 금액</span>
+        <div class="irow menu base-row">
+          <span class="iname">기본</span>
+          <input type="text" class="menu-input" id="fBaseMenu" placeholder="메뉴" autocomplete="off">
           <div class="amount-input sm">
             <input type="text" inputmode="numeric" pattern="[0-9]*" id="fBase" placeholder="0">
             <span>원</span>
           </div>
         </div>
-        <p class="hint base-hint">모두에게 같은 금액이 들어가요. 다른 사람만 아래에서 고쳐 쓰세요.</p>
+        <p class="hint base-hint">기본 메뉴·금액이 모두에게 들어가요. 다른 사람만 아래에서 고쳐 쓰세요. 메뉴가 비면 식당 이름으로 표시돼요.</p>
         <div id="indivRows"></div>
         <div class="label mt">
           <span>공통 금액 <span class="sub">(사이드·음료 등, 1/N 추가)</span></span>

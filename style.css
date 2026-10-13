@@ -97,6 +97,8 @@ input::placeholder { color: var(--sub); opacity: .7; }
 
 /* ================= 기록 탭 ================= */
 .irow { display: grid; grid-template-columns: 1fr 150px; align-items: center; gap: 10px; margin-bottom: 8px; }
+.irow.menu { grid-template-columns: 76px minmax(0, 1fr) 118px; gap: 8px; }
+.irow.menu .menu-input { min-height: 44px; padding: 9px 12px; font-size: 15px; }
 .base-row .iname { color: var(--accent); font-weight: 700; }
 .base-hint { margin: -2px 0 12px; }
 .hint.danger { color: var(--danger); }

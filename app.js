@@ -7,6 +7,7 @@
                         items, common, total, shares, paid, memo, createdAt, voucher? }]
         · shares : { 팀원id: 부담금액 }  ← 상품권 할인이 있으면 할인 후 금액
         · base   : 개별 금액의 기본 금액(빈 칸에 들어간 값) / fixed: 1/N에서 따로 정한 { 팀원id: 금액 }
+        · menus  : { 팀원id: 메뉴 } (개별 금액만, 빈 메뉴는 저장 안 함) / baseMenu: 기본 메뉴
         · voucher: { rate, gross, grossShares }  ← 지역상품권 할인 기록(할인율, 할인 전 총액·부담액)
         · paid   : { 팀원id: 입금확인 시각(timestamp) }  ← 없으면 미입금
    ===================================================================== */
@@ -113,6 +114,10 @@ function splitEven(total, ids) {
 
 // 개별 금액: 직접 넣은 금액이 없으면 기본 금액
 const itemOf = (f, id) => f.items[id] || f.base || 0;
+// 개별 금액의 메뉴: 직접 쓴 메뉴 → 기본 메뉴
+const menuIn = (f, id) => (f.menus[id] || f.baseMenu || '').trim();
+// 저장된 기록의 메뉴. 없으면 식당 이름으로 대체
+const menuOf = (m, id) => (m.menus && m.menus[id]) || m.place || m.type;
 // 1/N에서 금액을 따로 정한 참석자
 const fixedIds = f => ordered(f.participants).filter(id => f.fixed && id in f.fixed);
 const fixedSum = f => fixedIds(f).reduce((a, id) => a + (f.fixed[id] || 0), 0);
@@ -208,7 +213,7 @@ function blankForm(keep = {}) {
     split: (keep.type || '점심') === '회식' ? 'equal' : 'individual',
     participants: ['me'],
     total: 0, items: {}, common: 0, memo: '',
-    base: 0, fixed: {},
+    base: 0, fixed: {}, menus: {}, baseMenu: '',
     voucher: false, voucherRate: null,   // voucherRate: 수정 중인 기록의 할인율(새 기록은 설정값)
   };
 }
@@ -222,6 +227,7 @@ function renderRecord() {
   $('#fTotal').value = form.total ? fmt(form.total) : '';
   $('#fCommon').value = form.common ? fmt(form.common) : '';
   $('#fBase').value = form.base ? fmt(form.base) : '';
+  $('#fBaseMenu').value = form.baseMenu;
   $('#fMemo').value = form.memo;
   renderVoucher();
   $('#editBanner').hidden = !form.editId;
@@ -258,8 +264,9 @@ function renderIndivRows() {
   const ids = ordered(form.participants);
   $('#indivRows').innerHTML = ids.length
     ? ids.map(id => `
-      <div class="irow">
+      <div class="irow menu">
         <span class="iname">${esc(label(id))}</span>
+        <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
         <div class="amount-input sm">
           <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.items[id] ? fmt(form.items[id]) : ''}" placeholder="${form.base ? fmt(form.base) : '0'}">
           <span>원</span>
@@ -333,7 +340,7 @@ function renderPreview() {
     </div>
     ${voucher ? `<div class="pv-disc"><span>상품권 ${voucher.rate}% 할인</span><span>−${won(voucher.gross - total)}</span></div>
       <div class="pv-disc plain"><span>실제 결제</span><span>${won(total)}</span></div>` : ''}
-    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}${form.split === 'equal' && id in form.fixed ? ' <span class="sub">따로</span>' : ''}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
+    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}${form.split === 'equal' && id in form.fixed ? ' <span class="sub">따로</span>' : ''}${form.split === 'individual' && menuIn(form, id) ? ` <span class="sub">${esc(menuIn(form, id))}</span>` : ''}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
   `;
 }
 
@@ -387,7 +394,7 @@ function bindAmount(input, onValue) {
 bindAmount($('#fTotal'), v => { form.total = v; renderFixedHint(); renderPreview(); });
 bindAmount($('#fBase'), v => {
   form.base = v;
-  $$('#indivRows input').forEach(i => (i.placeholder = v ? fmt(v) : '0'));   // 다시 그리지 않아 입력 중 커서 유지
+  $$('#indivRows input[data-id]').forEach(i => (i.placeholder = v ? fmt(v) : '0'));   // 다시 그리지 않아 입력 중 커서 유지
   renderPreview();
 });
 $('#fFixedPick').addEventListener('click', e => {
@@ -404,8 +411,15 @@ $('#fixedRows').addEventListener('input', e => {
   renderFixedHint(); renderPreview();
 });
 bindAmount($('#fCommon'), v => { form.common = v; renderPreview(); });
+$('#fBaseMenu').addEventListener('input', e => {
+  form.baseMenu = e.target.value;
+  $$('#indivRows [data-menu]').forEach(i => (i.placeholder = form.baseMenu || '메뉴'));
+  renderPreview();
+});
 $('#indivRows').addEventListener('input', e => {
-  const input = e.target; if (!input.dataset.id) return;
+  const input = e.target;
+  if (input.dataset.menu) { form.menus[input.dataset.menu] = input.value; renderPreview(); return; }
+  if (!input.dataset.id) return;
   const v = toNum(input.value);
   input.value = v ? fmt(v) : '';
   form.items[input.dataset.id] = v;
@@ -415,10 +429,14 @@ $('#indivRows').addEventListener('input', e => {
 $('#fillLast').addEventListener('click', () => {
   const last = lastMealAt(form.place); if (!last) return;
   let n = 0;
-  ordered(form.participants).forEach(id => { if (last.items[id]) { form.items[id] = last.items[id]; n++; } });
+  ordered(form.participants).forEach(id => {
+    if (!last.items[id]) return;
+    form.items[id] = last.items[id]; n++;
+    if (last.menus && last.menus[id]) form.menus[id] = last.menus[id];
+  });
   if (!n) return toast('지난번과 겹치는 참석자가 없어요');
   renderIndivRows(); renderPreview();
-  toast(`${n}명 금액을 불러왔어요`);
+  toast(`${n}명 금액·메뉴를 불러왔어요`);
 });
 
 $('#cancelEdit').addEventListener('click', () => {
@@ -457,6 +475,11 @@ function saveMeal() {
     createdAt: Date.now(),
   };
   if (form.split === 'individual' && form.base) meal.base = form.base;
+  if (form.split === 'individual') {
+    const menus = Object.fromEntries(ids.map(id => [id, menuIn(form, id)]).filter(([, v]) => v));
+    if (Object.keys(menus).length) meal.menus = menus;
+    if (form.baseMenu.trim()) meal.baseMenu = form.baseMenu.trim();
+  }
   if (form.split === 'equal' && fixedIds(form).length) meal.fixed = Object.fromEntries(fixedIds(form).map(id => [id, form.fixed[id] || 0]));
   if (voucher) meal.voucher = voucher;
 
@@ -502,7 +525,8 @@ function mealCard(m) {
   const anyPaid = m.participants.some(id => isPaid(m, id));
   const shares = m.participants.map(id => {
     const paid = id !== 'me' && isPaid(m, id);
-    return `<span class="share ${id === 'me' ? 'me' : ''} ${paid ? 'paid' : ''}">${esc(label(id))} ${fmt(m.shares[id])}${paid ? ' ✓' : ''}</span>`;
+    const menu = m.menus && m.menus[id] ? ` · ${esc(m.menus[id])}` : '';
+    return `<span class="share ${id === 'me' ? 'me' : ''} ${paid ? 'paid' : ''}">${esc(label(id))}${menu} ${fmt(m.shares[id])}${paid ? ' ✓' : ''}</span>`;
   }).join('');
   const status = done ? '<span class="badge ok">정산 완료</span>'
     : anyPaid ? '<span class="badge part">일부 입금</span>'
@@ -545,6 +569,9 @@ $('#listBody').addEventListener('click', e => {
       items: Object.fromEntries(Object.entries(m.items).filter(([, v]) => !m.base || v !== m.base)),
       common: m.common || 0, memo: m.memo || '',
       base: m.base || 0, fixed: { ...(m.fixed || {}) },
+      // 기본 메뉴와 같은 메뉴는 비워 둠 (기본 금액과 같은 방식)
+      menus: Object.fromEntries(Object.entries(m.menus || {}).filter(([, v]) => v !== m.baseMenu)),
+      baseMenu: m.baseMenu || '',
       voucher: !!m.voucher, voucherRate: m.voucher ? m.voucher.rate : null,
     };
     showTab('record');
@@ -578,7 +605,7 @@ function buildMessage(per, ids) {
     const p = per[id];
     const hasOld = p.items.some(x => x.m.date < thisWeek);
     lines.push(`${nameOf(id)} ${won(p.amt)}${hasOld ? ' (지난 미입금 포함)' : ''}`);
-    if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${x.m.place || x.m.type} ${won(x.amt)}`));
+    if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${won(x.amt)}`));
   });
   const vMeals = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m)))].filter(m => m.voucher)
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
@@ -603,12 +630,14 @@ function tableDates(per, ids) {
 async function drawTable(per, ids) {
   try { await document.fonts.load('700 16px "Noto Sans KR"'); } catch (_) { /* 오프라인이면 기본 글꼴 */ }
   const dates = tableDates(per, ids);
-  const cell = {};   // cell[id][date] = { amt, voucher }
+  const cell = {};   // cell[id][date] = { amt, voucher, menus }
   ids.forEach(id => {
     cell[id] = {};
     per[id].items.forEach(x => {
-      const c = (cell[id][x.m.date] ||= { amt: 0, voucher: false });
+      const c = (cell[id][x.m.date] ||= { amt: 0, voucher: false, menus: [] });
       c.amt += x.amt; c.voucher ||= !!x.m.voucher;
+      const menu = menuOf(x.m, id);
+      if (!c.menus.includes(menu)) c.menus.push(menu);
     });
   });
   const C = { bg: '#ffffff', head: '#fbf1e4', text: '#3b2a20', sub: '#7a6656', line: '#f1e6d8',
@@ -617,9 +646,12 @@ async function drawTable(per, ids) {
   const ctx = document.createElement('canvas').getContext('2d');
   const W = (font, t) => { ctx.font = font; return ctx.measureText(t).width; };
 
-  const pad = 24, rowH = 40, headH = 54, gap = 14;
+  const pad = 24, rowH = 40, headH = 54, gap = 14, lineH = 16;
+  // 사람 행 높이: 메뉴 한 줄씩 (같은 날 여러 끼면 줄이 늘어남)
+  const personH = id => 40 + lineH * Math.max(1, ...dates.map(d => cell[id][d]?.menus.length || 0));
   const nameW = Math.max(64, ...ids.map(id => W(F(700, 15), nameOf(id)))) + 24;
-  const dayW = Math.max(66, ...ids.flatMap(id => dates.map(d => W(F(500, 15), fmt(cell[id][d]?.amt || 0))))) + 20;
+  const dayW = Math.max(66, ...ids.flatMap(id => dates.map(d =>
+    Math.max(W(F(500, 15), fmt(cell[id][d]?.amt || 0)), Math.min(110, Math.max(...(cell[id][d]?.menus || ['']).map(t => W(F(500, 12), t)))))))) + 20;
   const sumW = Math.max(80, ...ids.map(id => W(F(700, 15), fmt(per[id].amt)))) + 24;
   const tableW = nameW + dayW * dates.length + sumW;
   const range = dates.length > 1 ? `${fmtDate(dates[0])}~${fmtDate(dates[dates.length - 1])}` : fmtDate(dates[0]);
@@ -627,7 +659,7 @@ async function drawTable(per, ids) {
   const foot = [hasVoucher && '초록 칸: 지역상품권 할인 적용', state.account && `입금 계좌: ${state.account}`].filter(Boolean);
   const titleH = 56;
   const width = Math.ceil(Math.max(tableW, W(F(700, 20), `식대 정산 ${range}`)) + pad * 2);
-  const height = Math.ceil(pad + titleH + headH + rowH * (ids.length + 1) + (foot.length ? gap + foot.length * 22 : 0) + pad);
+  const height = Math.ceil(pad + titleH + headH + ids.reduce((a, id) => a + personH(id), 0) + rowH + (foot.length ? gap + foot.length * 22 : 0) + pad);
 
   const scale = 2, cv = ctx.canvas;
   cv.width = width * scale; cv.height = height * scale;
@@ -635,6 +667,13 @@ async function drawTable(per, ids) {
   ctx.fillStyle = C.bg; ctx.fillRect(0, 0, width, height);
   ctx.textBaseline = 'middle';
   const text = (t, x, y, font, color, align = 'left') => { ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.fillText(t, x, y); };
+  // 칸보다 긴 메뉴는 …로 줄임
+  const fit = (t, font, max) => {
+    ctx.font = font;
+    if (ctx.measureText(t).width <= max) return t;
+    while (t && ctx.measureText(t + '…').width > max) t = t.slice(0, -1);
+    return t + '…';
+  };
 
   text(`식대 정산 ${range}`, pad, pad + 14, F(700, 20), C.text);
   text(`미입금 ${ids.length}명 · 합계 ${won(ids.reduce((a, id) => a + per[id].amt, 0))}`, pad, pad + 40, F(500, 13), C.sub);
@@ -650,21 +689,26 @@ async function drawTable(per, ids) {
   text('합계', colX(dates.length) + sumW / 2, y + headH / 2, F(700, 15), C.text, 'center');
   y += headH;
 
-  const rows = [...ids.map(id => ({ name: nameOf(id), cells: dates.map(d => cell[id][d]), total: per[id].amt })),
+  const rows = [...ids.map(id => ({ h: personH(id), name: nameOf(id), cells: dates.map(d => cell[id][d]), total: per[id].amt })),
     { name: '합계', sumRow: true,
       cells: dates.map(d => ({ amt: ids.reduce((a, id) => a + (cell[id][d]?.amt || 0), 0) })),
       total: ids.reduce((a, id) => a + per[id].amt, 0) }];
+  const rowTops = [];
   rows.forEach(r => {
-    if (r.sumRow) { ctx.fillStyle = C.head; ctx.fillRect(pad, y, tableW, rowH); }
-    text(r.name, pad + 12, y + rowH / 2, F(700, 15), C.text);
+    const h = r.sumRow ? rowH : r.h;
+    rowTops.push(y);
+    if (r.sumRow) { ctx.fillStyle = C.head; ctx.fillRect(pad, y, tableW, h); }
+    text(r.name, pad + 12, y + h / 2, F(700, 15), C.text);
     r.cells.forEach((c, i) => {
-      const amt = c?.amt || 0;
-      if (c?.voucher) { ctx.fillStyle = C.saveBg; ctx.fillRect(colX(i) + 1, y + 1, dayW - 2, rowH - 2); }
-      text(amt ? fmt(amt) : '-', colX(i) + dayW - 10, y + rowH / 2, F(r.sumRow ? 700 : 500, 15),
+      const amt = c?.amt || 0, right = colX(i) + dayW - 10;
+      if (c?.voucher) { ctx.fillStyle = C.saveBg; ctx.fillRect(colX(i) + 1, y + 1, dayW - 2, h - 2); }
+      const menus = !r.sumRow && amt ? c.menus : [];
+      text(amt ? fmt(amt) : '-', right, y + (menus.length ? 21 : h / 2), F(r.sumRow ? 700 : 500, 15),
         amt ? (c?.voucher ? C.save : C.text) : C.sub, 'right');
+      menus.forEach((t, k) => text(fit(t, F(500, 12), dayW - 16), right, y + 40 + lineH * k, F(500, 12), C.sub, 'right'));
     });
-    text(fmt(r.total), colX(dates.length) + sumW - 12, y + rowH / 2, F(700, 15), C.accent, 'right');
-    y += rowH;
+    text(fmt(r.total), colX(dates.length) + sumW - 12, y + h / 2, F(700, 15), C.accent, 'right');
+    y += h;
   });
 
   // 격자
@@ -674,7 +718,7 @@ async function drawTable(per, ids) {
   [nameW, ...dates.map((_, i) => nameW + dayW * (i + 1))].forEach(x => {
     ctx.beginPath(); ctx.moveTo(pad + x + .5, top); ctx.lineTo(pad + x + .5, bottom); ctx.stroke();
   });
-  for (let ry = top + headH; ry < bottom; ry += rowH) { ctx.beginPath(); ctx.moveTo(pad, ry + .5); ctx.lineTo(pad + tableW, ry + .5); ctx.stroke(); }
+  rowTops.forEach(ry => { ctx.beginPath(); ctx.moveTo(pad, ry + .5); ctx.lineTo(pad + tableW, ry + .5); ctx.stroke(); });
 
   foot.forEach((t, i) => text(t, pad, y + gap + 11 + i * 22, F(500, 13), i === 0 && hasVoucher ? C.save : C.sub));
   return cv;
@@ -727,7 +771,7 @@ function renderSettle() {
             <button class="btn small ok" data-act="paid">입금 확인</button>
           </div>
           <div class="person-detail" ${open ? '' : 'hidden'}>
-            ${p.items.map(x => `<div class="drow"><span>${fmtDate(x.m.date)} ${esc(x.m.place || x.m.type)}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
+            ${p.items.map(x => `<div class="drow"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
           </div>
         </div>`;
     });
@@ -951,7 +995,7 @@ function exportSheets(meals) {
   const col = i => mealRows.reduce((a, r) => a + r[i], 0);
 
   const detailRows = meals.flatMap(m => ordered(m.participants).map(id => [
-    m.date, dow(m.date), m.type, m.place, fullName(id), m.shares[id] || 0,
+    m.date, dow(m.date), m.type, m.place, fullName(id), menuOf(m, id), m.shares[id] || 0,
     id === 'me' ? '결제자' : isPaid(m, id) ? '입금 완료' : '미입금',
     id !== 'me' && isPaid(m, id) ? dateStr(new Date(m.paid[id])) : '',
   ]));
@@ -974,8 +1018,8 @@ function exportSheets(meals) {
       ...mealRows,
       [B('합계'), '', '', '', '', '', '', B(col(7)), B(col(8)), B(col(9)), B(col(10)), B(col(11)), B(col(12))],
     ] },
-    { name: '사람별 상세', cols: [12, 6, 7, 18, 16, 11, 10, 12], rows: [
-      ['날짜', '요일', '구분', '식당', '이름', '부담액', '입금 상태', '입금 확인일'].map(H),
+    { name: '사람별 상세', cols: [12, 6, 7, 18, 16, 18, 11, 10, 12], rows: [
+      ['날짜', '요일', '구분', '식당', '이름', '메뉴', '부담액', '입금 상태', '입금 확인일'].map(H),
       ...detailRows,
     ] },
     { name: '사람별 합계', cols: [16, 10, 12, 12, 12], rows: [
