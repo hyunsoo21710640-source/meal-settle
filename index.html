@@ -85,9 +85,10 @@
         <div id="fixedRows"></div>
         <p class="hint" id="fixedHint" hidden></p>
         <div class="label mt"><span>메뉴 <span class="sub">(선택, 비우면 식당 이름)</span></span></div>
+        <div class="menu-pick"></div>
         <div class="irow menu-only base-row">
           <span class="iname">기본</span>
-          <input type="text" class="menu-input" id="fBaseMenuEq" list="menuList" placeholder="메뉴" autocomplete="off">
+          <input type="text" class="menu-input" id="fBaseMenuEq" placeholder="메뉴" autocomplete="off">
         </div>
         <div id="eqMenuRows"></div>
       </div>
@@ -97,10 +98,10 @@
           <span>각자 먹은 금액</span>
           <button class="linkbtn" id="fillLast" hidden>지난번 금액 불러오기</button>
         </div>
+        <div class="menu-pick"></div>
         <div class="irow menu base-row">
           <span class="iname">기본</span>
-          <input type="text" class="menu-input" id="fBaseMenu" list="menuList" placeholder="메뉴" autocomplete="off">
-          <datalist id="menuList"></datalist>
+          <input type="text" class="menu-input" id="fBaseMenu" placeholder="메뉴" autocomplete="off">
           <div class="amount-input sm">
             <input type="text" inputmode="numeric" pattern="[0-9]*" id="fBase" placeholder="0">
             <span>원</span>
@@ -161,6 +162,11 @@
         <button class="btn small primary" id="addMember">추가</button>
       </div>
       <p class="hint">기록에 쓰인 팀원은 '숨기기'만 가능해요. 숨겨도 지난 기록은 그대로 남아요.</p>
+    </div>
+
+    <div class="card">
+      <div class="label">저장된 메뉴 <span class="sub">기록을 저장하면 식당별로 등록돼요</span></div>
+      <div id="menuBookList"></div>
     </div>
 
     <div class="card">

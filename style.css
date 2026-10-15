@@ -107,6 +107,23 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .irow.menu-only { grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
 .irow.menu-only .menu-input { min-height: 44px; padding: 9px 12px; font-size: 15px; }
 .base-row .iname { color: var(--accent); font-weight: 700; }
+.menu-pick:empty { display: none; }
+.menu-pick { margin-bottom: 10px; }
+.menu-pick > .sub { display: block; margin-bottom: 6px; font-size: 12px; }
+.menu-pick > .sub b { color: var(--accent); }
+.mchips { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; }
+.mchip {
+  display: flex; flex-direction: column; align-items: center; gap: 1px; min-width: 0; padding: 6px 6px;
+  border: 1.5px solid var(--border); background: var(--card); border-radius: 12px; font-size: 14px; font-weight: 500; color: var(--text);
+}
+.mchip, .mchip span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mchip span { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
+.mchip:active { transform: scale(.97); background: var(--accent-weak); }
+.menu-input.target { border-color: var(--accent); background: var(--card); }
+.mb-place + .mb-place { margin-top: 12px; }
+.mb-head { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.mb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.mb-row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .base-hint { margin: -2px 0 12px; }
 .hint.danger { color: var(--danger); }
 .chip.small { padding: 5px 6px; min-height: 34px; font-size: 14px; }

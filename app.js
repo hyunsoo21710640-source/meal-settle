@@ -28,6 +28,7 @@ function defaultState() {
 }
 
 let state = loadState();
+ensureMenuBook();
 
 function loadState() {
   try {
@@ -35,6 +36,12 @@ function loadState() {
     if (raw) return Object.assign(defaultState(), JSON.parse(raw));
   } catch (e) { /* 저장소 접근 불가 시 빈 상태로 시작 */ }
   return defaultState();
+}
+// 저장된 메뉴가 없던 예전 데이터는 지난 기록의 메뉴로 한 번 채움 (오래된 것부터 → 최근 가격이 남음)
+function ensureMenuBook() {
+  if (state.menuBook) return;
+  state.menuBook = {};
+  [...state.meals].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt).forEach(rememberMenus);
 }
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -600,8 +607,6 @@ function renderRecord() {
   state.meals.forEach(m => { if (m.place) cnt[m.place] = (cnt[m.place] || 0) + 1; });
   $('#placeList').innerHTML = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).slice(0, 30)
     .map(p => `<option value="${esc(p)}">`).join('');
-  renderMenuList();
-
   renderPeople();
   renderSplitBoxes();
 }
@@ -619,6 +624,7 @@ function renderSplitBoxes() {
   $('#indivBox').hidden = form.split !== 'individual';
   if (form.split === 'individual') renderIndivRows();
   else renderFixed();
+  if (menuTarget !== 'base' && !form.participants.includes(menuTarget)) menuTarget = 'base';
   renderFillLast();
   renderPreview();
 }
@@ -629,13 +635,14 @@ function renderIndivRows() {
     ? ids.map(id => `
       <div class="irow menu">
         <span class="iname">${esc(label(id))}</span>
-        <input type="text" class="menu-input" data-menu="${id}" list="menuList" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
+        <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
         <div class="amount-input sm">
           <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.items[id] ? fmt(form.items[id]) : ''}" placeholder="${form.base ? fmt(form.base) : '0'}">
           <span>원</span>
         </div>
       </div>`).join('')
     : `<p class="hint" style="margin:0 0 8px">참석자를 먼저 선택하세요.</p>`;
+  renderMenuPick();
 }
 
 // 1/N: 따로 정할 사람 고르기 + 금액 칸
@@ -655,8 +662,9 @@ function renderFixed() {
   $('#eqMenuRows').innerHTML = ids.map(id => `
     <div class="irow menu-only">
       <span class="iname">${esc(label(id))}</span>
-      <input type="text" class="menu-input" data-menu="${id}" list="menuList" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
+      <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
     </div>`).join('');
+  renderMenuPick();
 }
 function renderFixedHint() {
   const fx = fixedIds(form), rest = ordered(form.participants).length - fx.length;
@@ -678,23 +686,33 @@ function lastMealAt(place) {
     .filter(m => m.place === p && m.split === 'individual' && m.id !== form.editId)
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)[0] || null;
 }
-// 메뉴 자동완성·가격: 그 식당 기록(식당이 비면 전체)에서 메뉴별 가장 최근 가격. 1/N 기록은 가격 없이 이름만
-function menuBook() {
-  const p = form.place.trim(), book = {};
-  [...state.meals].filter(m => m.menus && (!p || m.place === p) && m.id !== form.editId)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)   // 최근 것부터 → 처음 본 가격을 씀
-    .forEach(m => Object.entries(m.menus).forEach(([id, menu]) => {
-      if (!(menu in book)) book[menu] = 0;
-      if (!book[menu] && m.split === 'individual') book[menu] = m.items[id] || 0;
-    }));
-  return book;
+// 저장된 메뉴: state.menuBook = { 식당: { 메뉴: 가격 } }. 기록을 저장할 때만 등록(가격 0 = 1/N이라 모름)
+const bookAt = place => state.menuBook[place.trim()] || {};
+// 메뉴 박스를 누르면 들어갈 칸: 'base'(기본) 또는 팀원 id. 메뉴 칸을 누를 때 바뀜
+let menuTarget = 'base';
+function renderMenuPick() {
+  const book = bookAt(form.place), names = Object.keys(book);
+  const target = menuTarget === 'base' ? '기본' : label(menuTarget);
+  $$('.menu-pick').forEach(el => {
+    el.innerHTML = names.length
+      ? `<div class="sub">저장된 메뉴 · 누르면 <b>${esc(target)}</b> 칸에 들어가요</div>
+         <div class="mchips">${names.map(n => `<button class="mchip" data-pick="${esc(n)}">${esc(n)}${book[n] ? `<span>${fmt(book[n])}</span>` : ''}</button>`).join('')}</div>`
+      : '';
+  });
+  $$('.menu-input').forEach(i => i.classList.toggle('target', (i.dataset.menu || 'base') === menuTarget && names.length > 0));
 }
-function renderMenuList() {
-  $('#menuList').innerHTML = Object.keys(menuBook()).slice(0, 30).map(t => `<option value="${esc(t)}">`).join('');
+// 저장할 때 이 기록의 메뉴·가격을 등록 (같은 메뉴는 최근 가격으로 덮어씀)
+function rememberMenus(meal) {
+  if (!meal.menus) return;
+  const book = (state.menuBook[meal.place] ||= {});
+  Object.entries(meal.menus).forEach(([id, menu]) => {
+    const price = meal.split === 'individual' ? meal.items[id] || 0 : 0;
+    book[menu] = price || book[menu] || 0;
+  });
 }
 // 아는 메뉴를 고르면 지난번 가격을 넣음. 비어 있거나 자동으로 넣었던 칸만 (직접 쓴 금액은 그대로)
 function fillPrice(menu, id) {
-  const price = form.split === 'individual' && menuBook()[menu.trim()];
+  const price = form.split === 'individual' && bookAt(form.place)[menu.trim()];
   if (!price) return;
   const auto = (form.auto ||= {});
   if (id === 'base') {
@@ -753,7 +771,7 @@ $('#fType').addEventListener('click', e => {
   setSeg('#fType', v); setSeg('#fSplit', form.split);
   renderSplitBoxes();
 });
-$('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); renderMenuList(); });
+$('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); renderMenuPick(); });
 $('#fMemo').addEventListener('input', e => (form.memo = e.target.value));
 $('#fVoucher').addEventListener('change', e => { form.voucher = e.target.checked; renderVoucher(); renderPreview(); });
 
@@ -847,6 +865,20 @@ $('#fillLast').addEventListener('click', () => {
   toast(`${n}명 금액·메뉴를 불러왔어요`);
 });
 
+// 메뉴 칸을 누르면 그 칸이 메뉴 박스의 대상이 됨
+$('#tab-record').addEventListener('focusin', e => {
+  const input = e.target.closest('.menu-input'); if (!input) return;
+  menuTarget = input.dataset.menu || 'base'; renderMenuPick();
+});
+$('#tab-record').addEventListener('click', e => {
+  const name = e.target.closest('[data-pick]')?.dataset.pick; if (name == null) return;
+  const box = form.split === 'individual' ? '#indivBox' : '#equalBox';
+  const input = menuTarget === 'base' ? $(`${box} .base-row .menu-input`) : $(`${box} [data-menu="${menuTarget}"]`);
+  if (!input) return;
+  input.value = name;
+  input.dispatchEvent(new Event('input', { bubbles: true }));   // 입력한 것과 같게 처리(가격 채우기·미리보기)
+});
+
 $('#cancelEdit').addEventListener('click', () => {
   form = blankForm(); renderRecord(); showTab('list');
 });
@@ -897,6 +929,7 @@ function saveMeal() {
     state.meals.push(meal);
   }
   state.lastParticipants = ids;
+  rememberMenus(meal);
   saveState();
 
   form = blankForm({ date: meal.date, type: meal.type });
@@ -1349,6 +1382,7 @@ function renderSettings() {
   if (!$('#xFrom').value) $('#xFrom').value = todayStr().slice(0, 8) + '01';   // 기본: 이번 달 1일 ~ 오늘
   if (!$('#xTo').value) $('#xTo').value = todayStr();
   renderXlsxHint();
+  renderMenuBook();
   const used = usedIds();
   const others = state.members.filter(m => m.id !== 'me');
   $('#memberList').innerHTML = others.length ? others.map(m => `
@@ -1374,6 +1408,26 @@ $('#sVoucher').addEventListener('change', e => {
   if (v < 1 || v > 50) { e.target.value = state.voucherRate; return toast('할인율은 1~50% 사이로 넣어 주세요'); }
   state.voucherRate = v; e.target.value = v; saveState();
   toast(`지역상품권 할인율을 ${v}%로 바꿨어요`);
+});
+
+function renderMenuBook() {
+  const places = Object.keys(state.menuBook).filter(p => Object.keys(state.menuBook[p]).length).sort();
+  $('#menuBookList').innerHTML = places.length ? places.map(p => `
+    <div class="mb-place" data-place="${esc(p)}">
+      <div class="mb-head">${esc(p || '(식당 미입력)')}</div>
+      ${Object.entries(state.menuBook[p]).map(([n, v]) => `
+        <div class="mb-row"><span>${esc(n)}</span><span class="sub">${v ? won(v) : '가격 없음'}</span><button class="linkbtn danger" data-del="${esc(n)}">삭제</button></div>`).join('')}
+    </div>`).join('')
+    : '<p class="hint" style="margin:0">아직 저장된 메뉴가 없어요. 기록에 메뉴를 넣고 저장하면 여기에 생겨요.</p>';
+}
+$('#menuBookList').addEventListener('click', e => {
+  const name = e.target.closest('[data-del]')?.dataset.del; if (name == null) return;
+  const place = e.target.closest('.mb-place').dataset.place;
+  const price = state.menuBook[place][name];
+  delete state.menuBook[place][name];
+  if (!Object.keys(state.menuBook[place]).length) delete state.menuBook[place];
+  saveState(); renderMenuBook();
+  toast(`${name} 메뉴를 지웠어요`, '되돌리기', () => { (state.menuBook[place] ||= {})[name] = price; saveState(); renderMenuBook(); });
 });
 
 function addMember() {
@@ -1498,6 +1552,7 @@ $('#importFile').addEventListener('change', async e => {
     if (!Array.isArray(data.meals) || !Array.isArray(data.members)) throw new Error();
     if (!confirm(`기록 ${data.meals.length}건을 불러올까요? 지금 데이터는 덮어써져요.`)) return;
     state = Object.assign(defaultState(), data);
+    ensureMenuBook();
     saveState(); form = blankForm(); showTab('settings');
     toast('백업을 불러왔어요');
   } catch (_) { toast('올바른 백업 파일이 아니에요'); }
@@ -1505,7 +1560,7 @@ $('#importFile').addEventListener('change', async e => {
 });
 $('#resetBtn').addEventListener('click', () => {
   if (!confirm('모든 기록과 팀원 정보를 지울까요? 되돌릴 수 없어요.')) return;
-  state = defaultState(); saveState(); form = blankForm(); showTab('settings');
+  state = defaultState(); ensureMenuBook(); saveState(); form = blankForm(); showTab('settings');
   toast('초기화했어요');
 });
 
