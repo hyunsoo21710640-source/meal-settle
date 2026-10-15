@@ -65,8 +65,8 @@
 
 ```js
 state = {
-  members: [{ id: 'me', name: '박현수', active: true }, { id: 'abc1', name: '김철수', active: true }],
-  account: '국민 000-0000 박현수',
+  members: [{ id: 'me', name: '홍길동', active: true }, { id: 'abc1', name: '김철수', active: true }],
+  account: '국민 000-0000 홍길동',
   rounding: 'none',            // none | up100 | down100
   includeDetail: false,        // 정산 메시지에 상세 내역 포함 여부
   lastParticipants: ['me', 'abc1'],

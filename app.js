@@ -25,6 +25,9 @@ function defaultState() {
     lastParticipants: ['me'],
     includeDetail: false,
     askMenuSave: true,         // 기록 저장 후 새 식당·메뉴를 저장할지 묻기 (끄면 자동 저장 안 함)
+    // 회의비(법인카드) 기본값: 결의서·회의록 기본 명단, 월 예산, 인당 한도, 출장 1식 반납액, 회의록 기본값
+    // 이름·회사 규정이 공개 저장소에 남지 않도록 비워 두고 설정 탭에서 넣는다
+    corp: { names: [], budget: 0, limit: 0, tripFee: 0, start: '', end: '', place: '', note: '' },
   };
 }
 
@@ -176,7 +179,9 @@ const voucherSaved = (m, id) => (m.voucher ? (m.voucher.grossShares[id] || 0) - 
 
 const isPaid = (m, id) => !!(m.paid && m.paid[id]);
 // 내 몫을 제외한 모든 사람이 입금했으면 정산 완료
-const isDone = m => m.participants.every(id => id === 'me' || !(m.shares[id] > 0) || isPaid(m, id));
+// 회의비(법인카드) 기록: 팀원 정산이 없고(participants·shares 비움) 지출결의 완료가 '정산 완료'
+const isCorp = m => m.pay === 'corp';
+const isDone = m => (isCorp(m) ? !!m.corp.resolved : m.participants.every(id => id === 'me' || !(m.shares[id] > 0) || isPaid(m, id)));
 
 // 사람별 미입금 금액
 function outstanding() {
@@ -236,7 +241,7 @@ const home = { who: 'team', cmp: 'last', panel: 0, week: 7, pie: 'place', slice:
 // 금액 기준: 팀 전체(실제 결제액) 또는 내 몫(내가 참석한 끼니의 내 부담액)
 const isMe = () => home.who === 'me';
 const amt = m => (isMe() ? m.shares.me || 0 : m.total);
-const homeMeals = () => (isMe() ? state.meals.filter(m => m.participants.includes('me')) : state.meals);
+const homeMeals = () => state.meals.filter(m => !isCorp(m) && (!isMe() || m.participants.includes('me')));   // 회의비는 내 돈이 아니라 뺌
 const perLabel = () => (isMe() ? '한 끼 평균' : '1인 평균');
 
 // 한 주(월~일) 통계. 점심만 평균에 넣음
@@ -590,6 +595,7 @@ function blankForm(keep = {}) {
     total: 0, items: {}, common: 0, memo: '',
     base: 0, fixed: {}, menus: {}, baseMenu: '',
     voucher: false, voucherRate: null,   // voucherRate: 수정 중인 기록의 할인율(새 기록은 설정값)
+    pay: 'personal', corp: null,         // 회식일 때 결제 방법. corp: 회의비 입력 내용(newCorp)
   };
 }
 let form = blankForm();
@@ -614,6 +620,7 @@ function renderRecord() {
   renderPlaceField(); $('#placePick').hidden = true;
   renderPeople();
   renderSplitBoxes();
+  renderCorpMode();
 }
 
 function renderPeople() {
@@ -797,6 +804,8 @@ function renderVoucher() {
 }
 
 function renderPreview() {
+  if (isCorpForm()) return renderCorpPreview();
+  $('#preview').className = 'card';
   const ids = ordered(form.participants);
   const { shares, voucher } = finalShares(form);
   const total = sum(shares);
@@ -823,8 +832,9 @@ $('#fType').addEventListener('click', e => {
   const v = e.target.closest('button')?.dataset.v; if (!v) return;
   form.type = v;
   form.split = v === '회식' ? 'equal' : 'individual';   // 점심=개별, 회식=1/N 기본값
+  if (v !== '회식') form.pay = 'personal';                // 회의비는 회식에만
   setSeg('#fType', v); setSeg('#fSplit', form.split);
-  renderSplitBoxes();
+  renderSplitBoxes(); renderCorpMode();
 });
 $('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); renderMenuPick(); });
 $('#fPlace').addEventListener('click', () => { if ($('#fPlace').readOnly) openPlacePick($('#placePick').hidden); });
@@ -951,6 +961,7 @@ $('#cancelEdit').addEventListener('click', () => {
 $('#saveBtn').addEventListener('click', saveMeal);
 
 function saveMeal() {
+  if (isCorpForm()) return saveCorpMeal();
   const ids = ordered(form.participants);
   if (!ids.length) return toast('참석자를 선택해 주세요');
   const { shares, voucher } = finalShares(form);
@@ -985,7 +996,12 @@ function saveMeal() {
   if (form.baseMenu.trim()) meal.baseMenu = form.baseMenu.trim();
   if (form.split === 'equal' && fixedIds(form).length) meal.fixed = Object.fromEntries(fixedIds(form).map(id => [id, form.fixed[id] || 0]));
   if (voucher) meal.voucher = voucher;
+  state.lastParticipants = ids;
+  commitMeal(meal);
+}
 
+// 새 기록을 넣거나 수정한 기록을 바꾸고, 새 식당·메뉴가 있으면 저장할지 물음
+function commitMeal(meal) {
   const wasEdit = !!form.editId;
   if (wasEdit) {
     const i = state.meals.findIndex(m => m.id === form.editId);
@@ -993,7 +1009,7 @@ function saveMeal() {
   } else {
     state.meals.push(meal);
   }
-  state.lastParticipants = ids;
+  const total = meal.total;
   const changes = state.askMenuSave ? menuChanges(meal) : [];   // 묻기를 끈 경우 자동 저장 안 함
   saveState();
 
@@ -1010,6 +1026,256 @@ function saveMeal() {
     if (save && !wasEdit) renderRecord();   // 새 식당을 바로 고를 수 있게
     done(save);
   });
+}
+
+/* ===================== 회의비 (법인카드) =====================
+   - 회식 + 결제 방법 '회의비'. 팀원 정산 없이 결의서·회의록·출장 반납 메모를 남김
+   - 사람은 이름으로 저장(외부 참석자·기본 명단). sign = 결의서·회의록에 올림, trip = 출장 중(1식 반납 메모)
+   - 결의서 인원 = 금액 ÷ 인당 한도(올림). 맞지 않으면 알려만 주고 사용자가 직접 고름 */
+const isCorpForm = () => form.type === '회식' && form.pay === 'corp';
+const signed = c => c.people.filter(p => p.sign);
+const minutesFilled = mn => !!(mn.topic.trim() || mn.items.some(s => s.trim()));
+function corpStatus(c) {
+  const need = c.total > 0 && c.limit > 0 ? Math.ceil(c.total / c.limit) : 0, n = signed(c).length;   // 한도를 안 넣었으면 계산 안 함
+  return { need, n, per: n ? Math.round(c.total / n) : 0 };
+}
+// 그 달 회의비 사용액 (수정 중인 기록은 뺌)
+const corpUsed = (month, exceptId) => state.meals.filter(m => isCorp(m) && m.date.startsWith(month) && m.id !== exceptId).reduce((a, m) => a + m.total, 0);
+
+function newCorp() {
+  const c = state.corp;
+  return {
+    purpose: '', total: 0, limit: c.limit, tripFee: c.tripFee,
+    people: c.names.map(name => ({ name, sign: true, trip: false })),
+    minutes: { start: c.start, end: c.end, place: c.place, topic: '', items: [], notes: c.note ? [c.note] : [] },
+  };
+}
+function renderCorpMode() {
+  const corp = isCorpForm();
+  $('#payRow').hidden = form.type !== '회식';
+  setSeg('#fPay', form.pay);
+  $('#corpBox').hidden = !corp;
+  ['#peopleCard', '#splitCard', '#vCard'].forEach(s => ($(s).hidden = corp));
+  $('#memoLabel').textContent = corp ? '특이사항 메모 (선택)' : '메모 (선택)';
+  $('#fMemo').placeholder = corp ? '예: 외부 손님 동석' : '예: 신규 입사자 환영';
+  if (corp) renderCorp();
+  renderPreview();
+}
+function renderCorp() {
+  const c = form.corp;
+  $('#cPurpose').value = c.purpose;
+  $('#cTotal').value = c.total ? fmt(c.total) : '';
+  // 이름 추가 후보: 기본 명단 + 팀원
+  const names = [...state.corp.names, ...state.members.filter(m => m.active && m.id !== 'me').map(m => m.name)];
+  $('#cNameList').innerHTML = [...new Set(names)].map(n => `<option value="${esc(n)}">`).join('');
+  renderCorpPeople();
+  renderMinutesCard();
+}
+function renderCorpPeople() {
+  const c = form.corp;
+  $('#cPeople').innerHTML = c.people.length ? c.people.map((p, i) => `
+    <div class="crow" data-i="${i}">
+      <b>${esc(p.name)}</b>
+      <button class="tg ${p.sign ? 'on' : ''}" data-t="sign" aria-pressed="${p.sign}">${p.sign ? '✓ 올림' : '안 올림'}</button>
+      <button class="tg ${p.trip ? 'trip' : ''}" data-t="trip" aria-pressed="${p.trip}">${p.trip ? '✈ 출장' : '-'}</button>
+      <button class="x" data-t="del" aria-label="${esc(p.name)} 빼기">✕</button>
+    </div>`).join('') : '<p class="hint" style="margin:0 0 8px">참석자를 추가해 주세요.</p>';
+  renderCorpNeed();
+}
+function renderCorpNeed() {
+  const c = form.corp, { need, n, per } = corpStatus(c);
+  const el = $('#cNeed');
+  el.className = 'need' + (need && n !== need ? ' warn' : '');
+  el.textContent = !need ? `올림 ${n}명`
+    : n === need ? `필요 ${need}명 · 올림 ${n}명 ✓`
+    : n > need ? `${need}명만 필요해요 · 지금 ${n}명` : `${need}명 필요해요 · 지금 ${n}명`;
+  $('#cHint').textContent = need
+    ? `${fmt(c.total)} ÷ ${fmt(c.limit)} → ${need}명 필요${n ? ` · 1인 ${won(per)}` : ''}. ✓ 올린 사람이 결의서와 회의록에 똑같이 들어가요.`
+    : !c.limit ? '설정에서 인당 한도를 넣으면 결의서에 올릴 인원을 알려 드려요. 기본 명단도 설정에서 넣을 수 있어요.'
+    : '금액을 넣으면 결의서에 올릴 인원을 알려 드려요. ✓ 올린 사람이 결의서와 회의록에 들어가요.';
+  renderMinutesCard();
+  renderPreview();
+}
+function renderMinutesCard() {
+  const mn = form.corp.minutes, filled = minutesFilled(mn);
+  const info = [mn.start && mn.end ? `${mn.start}~${mn.end}` : '', mn.place, `참석 ${signed(form.corp).length}인`,
+    filled ? `내용 ${(mn.topic.trim() ? 1 : 0) + mn.items.filter(s => s.trim()).length}줄` : ''].filter(Boolean).join(' · ');
+  $('#cMinutes').innerHTML = `<span class="grow"><b>회의록</b> <span class="sub">· ${filled ? '작성함' : '아직 안 씀'}</span>
+    <span class="sub" style="display:block">${esc(info)}</span></span><span class="go">${filled ? '수정' : '작성'} ›</span>`;
+}
+const leftText = v => (v >= 0 ? won(v) : `${won(-v)} 초과`);   // 예산 남은 금액, 넘으면 '초과'
+function renderCorpPreview() {
+  const c = form.corp, { n, per } = corpStatus(c), box = $('#preview');
+  box.className = 'card corp-pv';
+  if (!c.total) { box.innerHTML = '<div class="sub">금액을 넣으면 예산과 반납 메모가 여기 표시돼요.</div>'; return; }
+  const month = (form.date || todayStr()).slice(0, 7), left = state.corp.budget - corpUsed(month, form.editId);
+  const trips = c.people.filter(p => p.trip);
+  box.innerHTML = `
+    <div class="r"><span>회의비 · 팀원 정산 없음</span><b>${won(c.total)}</b></div>
+    <div class="r"><span>결의서 ${n}명 · 1인</span><span>${n ? won(per) : '-'}${c.limit ? ` <span class="sub">/ 한도 ${fmt(c.limit)}</span>` : ''}</span></div>
+    ${state.corp.budget ? `<div class="r"><span>${Number(month.slice(5))}월 예산 남은 금액</span><b>${leftText(left)} → ${leftText(left - c.total)}</b></div>` : ''}
+    <div class="r"><span>ERP 반납 메모</span><b>${trips.length ? `${esc(trips.map(p => p.name).join(', '))}${c.tripFee ? ' ' + won(c.tripFee * trips.length) : ''}` : '없음'}</b></div>`;
+}
+
+$('#fPay').addEventListener('click', e => {
+  const v = e.target.closest('button')?.dataset.v; if (!v) return;
+  form.pay = v;
+  if (v === 'corp' && !form.corp) form.corp = newCorp();
+  renderCorpMode();
+});
+$('#cPurpose').addEventListener('input', e => (form.corp.purpose = e.target.value));
+bindAmount($('#cTotal'), v => { form.corp.total = v; renderCorpNeed(); });
+$('#cPeople').addEventListener('click', e => {
+  const t = e.target.closest('[data-t]'); if (!t) return;
+  const i = Number(t.closest('.crow').dataset.i), p = form.corp.people[i];
+  if (t.dataset.t === 'sign') p.sign = !p.sign;
+  if (t.dataset.t === 'trip') p.trip = !p.trip;
+  if (t.dataset.t === 'del') form.corp.people.splice(i, 1);
+  renderCorpPeople();
+});
+function addCorpPerson() {
+  const input = $('#cAddName'), name = input.value.trim(), c = form.corp;
+  if (!name) return;
+  if (c.people.some(p => p.name === name)) return toast('이미 있는 이름이에요');
+  const { need, n } = corpStatus(c);
+  c.people.push({ name, sign: !need || n < need, trip: false });   // 이미 인원이 차면 '안 올림'으로 추가
+  input.value = '';
+  renderCorpPeople();
+}
+$('#cAdd').addEventListener('click', addCorpPerson);
+$('#cAddName').addEventListener('keydown', e => { if (e.key === 'Enter') addCorpPerson(); });
+$('#cMinutes').addEventListener('click', () => openMinutes({ corp: form.corp, date: form.date, place: form.place, mealId: form.editId, onClose: renderMinutesCard }));
+
+function saveCorpMeal() {
+  const c = form.corp, { need, n, per } = corpStatus(c);
+  if (c.total <= 0) return toast('금액을 입력해 주세요');
+  if (!n) return toast('결의서에 올릴 사람을 골라 주세요');
+  // 인당 한도를 안 넣었으면(need 0) 인원 확인은 건너뜀
+  if (need && n < need && !confirm(`결의서에 ${need}명이 필요한데 ${n}명이에요 (1인 ${won(per)}, 한도 ${won(c.limit)}). 그대로 저장할까요?`)) return;
+  if (need && n > need && !confirm(`${need}명만 필요한데 ${n}명을 올렸어요. 그대로 저장할까요?`)) return;
+  const old = form.editId && state.meals.find(m => m.id === form.editId);
+  const trips = c.people.filter(p => p.trip).map(p => p.name);
+  commitMeal({
+    id: form.editId || uid(), date: form.date || todayStr(), type: '회식', pay: 'corp',
+    place: form.place.trim(), split: 'corp', participants: [], items: {}, common: 0,
+    total: c.total, shares: {}, paid: {}, memo: form.memo.trim(), createdAt: Date.now(),
+    corp: {
+      purpose: c.purpose.trim(), people: c.people.map(p => ({ ...p })), limit: c.limit, tripFee: c.tripFee,
+      minutes: cleanMinutes(c.minutes),
+      resolved: old?.corp?.resolved || null,
+      // ERP 반납 체크는 아직 출장으로 남아 있는 사람만 유지
+      returned: Object.fromEntries(Object.entries(old?.corp?.returned || {}).filter(([k]) => trips.includes(k))),
+    },
+  });
+}
+const cleanMinutes = mn => ({ ...mn, topic: mn.topic.trim(), place: (mn.place || '').trim(),
+  items: mn.items.map(s => s.trim()).filter(Boolean), notes: mn.notes.map(s => s.trim()).filter(Boolean) });
+const cloneCorp = c => ({ ...c, people: c.people.map(p => ({ ...p })),
+  minutes: { ...c.minutes, items: [...c.minutes.items], notes: [...c.minutes.notes] } });
+
+/* --- 회의록 시트: 기록 탭(입력 중)과 정산 탭(저장된 기록)에서 같이 씀. ctx = { corp, date, place, mealId, onClose } --- */
+let mCtx = null;
+function openMinutes(ctx) {
+  mCtx = ctx;
+  const mn = ctx.corp.minutes;
+  if (!mn.items.length) mn.items.push('');
+  if (!mn.notes.length) mn.notes.push('');
+  const d = parseDate(ctx.date || todayStr());
+  $('#mFor').textContent = `${fmtDateLong(ctx.date || todayStr())} ${ctx.place || '회식'} 회의비에 붙는 회의록이에요.`;
+  $('#mDate').textContent = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+  $('#mStart').value = mn.start || ''; $('#mEnd').value = mn.end || '';
+  $('#mPlace').value = mn.place || ''; $('#mTopic').value = mn.topic || '';
+  const names = signed(ctx.corp).map(p => p.name);
+  $('#mNames').textContent = names.join(', ') || '결의서에 올린 사람이 없어요';
+  $('#mCount').textContent = `${names.length}인`;
+  renderMinutesLists();
+  $('#minutesSheet').hidden = false;
+  $('#minutesSheet').scrollTop = 0;
+}
+function renderMinutesLists() {
+  const mn = mCtx.corp.minutes;
+  const lines = (key, ph) => mn[key].map((v, i) => `
+    <div class="mline"><input type="text" data-list="${key}" data-i="${i}" value="${esc(v)}" placeholder="${ph}" aria-label="${key === 'items' ? '세부 항목' : '비고'} ${i + 1}" autocomplete="off">
+    <button data-del="${key}" data-i="${i}" aria-label="지우기">✕</button></div>`).join('');
+  $('#mItems').innerHTML = lines('items', '예: 수중조사 범위 및 일정 검토');
+  $('#mNotes').innerHTML = lines('notes', '예: 회의 후 식사');
+}
+function closeMinutes() {
+  const mn = mCtx.corp.minutes;
+  Object.assign(mn, cleanMinutes(mn));
+  $('#minutesSheet').hidden = true;
+  mCtx.onClose?.();
+}
+$('#minutesSheet').addEventListener('input', e => {
+  const t = e.target, mn = mCtx.corp.minutes;
+  if (t.dataset.list) mn[t.dataset.list][Number(t.dataset.i)] = t.value;
+  else if (t.id === 'mStart') mn.start = t.value;
+  else if (t.id === 'mEnd') mn.end = t.value;
+  else if (t.id === 'mPlace') mn.place = t.value;
+  else if (t.id === 'mTopic') mn.topic = t.value;
+});
+$('#minutesSheet').addEventListener('click', e => {
+  const mn = mCtx.corp.minutes, b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.add) { mn[b.dataset.add].push(''); renderMinutesLists(); $(`#minutesSheet [data-list="${b.dataset.add}"][data-i="${mn[b.dataset.add].length - 1}"]`).focus(); }
+  if (b.dataset.del) { mn[b.dataset.del].splice(Number(b.dataset.i), 1); renderMinutesLists(); }
+  if (b.id === 'mClose') closeMinutes();
+  if (b.id === 'mPreview') openPdfPreview(mCtx);
+  if (b.id === 'mPdf') printMinutes(mCtx);
+  if (b.id === 'mLoadLast') loadLastMinutes();
+});
+// 같은 현장 회의가 이어질 때: 가장 최근 회의록의 시간·장소·내용·비고를 가져옴 (참석자는 이 기록 명단 그대로)
+function loadLastMinutes() {
+  const last = state.meals.filter(m => isCorp(m) && m.id !== mCtx.mealId && minutesFilled(m.corp.minutes))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)[0];
+  if (!last) return toast('불러올 회의록이 없어요');
+  const mn = mCtx.corp.minutes;
+  if (minutesFilled(mn) && !confirm(`${fmtDate(last.date)} 회의록으로 바꿀까요? 지금 쓴 내용은 지워져요.`)) return;
+  const src = last.corp.minutes;
+  Object.assign(mn, { start: src.start, end: src.end, place: src.place, topic: src.topic, items: [...src.items], notes: [...src.notes] });
+  openMinutes(mCtx);
+  toast(`${fmtDate(last.date)} 회의록을 불러왔어요`);
+}
+
+// 원본 양식(A4 테두리, 「회 의 록」, 명조)으로 회의록 HTML
+function minutesHtml(ctx) {
+  const mn = cleanMinutes(ctx.corp.minutes), names = signed(ctx.corp).map(p => p.name), d = parseDate(ctx.date || todayStr());
+  const time = mn.start && mn.end ? ` ${mn.start} ∼${mn.end}` : mn.start ? ` ${mn.start}` : '';
+  return `<div class="mm-page"><div class="mm-box">
+    <h1 class="mm-title">회의록</h1>
+    <p>1. 회의일자 : ${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일${time}</p>
+    <p>2. 회의장소 : ${esc(mn.place)}</p>
+    <p>3. 참석자(${names.length}인)</p>
+    <p class="i1">○ ${esc(names.join(', '))}</p>
+    <p>4. 회의내용</p>
+    ${mn.topic ? `<p class="i1">○ ${esc(mn.topic)}</p>` : ''}
+    ${mn.items.map(s => `<p class="i2">- ${esc(s)}</p>`).join('')}
+    <p>5. 비고</p>
+    ${mn.notes.map(s => `<p class="i2">- ${esc(s)}</p>`).join('')}
+  </div></div>`;
+}
+const minutesFile = date => `회의록(${date.slice(2, 4)}.${date.slice(5, 7)}.${date.slice(8, 10)})`;
+function openPdfPreview(ctx) {
+  const scaleBox = $('#pdfScale');
+  scaleBox.innerHTML = minutesHtml(ctx);
+  $('#pdfPreview').hidden = false;
+  $('#pdfPreview').onclick = e => {
+    if (e.target.closest('#pvClose')) $('#pdfPreview').hidden = true;
+    if (e.target.closest('#pvPdf')) printMinutes(ctx);
+  };
+  const page = scaleBox.firstElementChild, k = scaleBox.parentElement.clientWidth / page.offsetWidth;
+  scaleBox.style.transform = `scale(${k})`;
+  scaleBox.parentElement.style.height = page.offsetHeight * k + 'px';
+}
+// 인쇄 화면의 'PDF로 저장'으로 PDF를 만듦. 파일 이름은 문서 제목을 따라감 → 회의록(26.10.15)
+async function printMinutes(ctx) {
+  $('#printArea').innerHTML = minutesHtml(ctx);
+  try { await Promise.all([document.fonts.load('20px "Nanum Myeongjo"'), document.fonts.load('700 20px "Nanum Myeongjo"')]); } catch (_) { /* 오프라인이면 기본 명조 */ }
+  const title = document.title;
+  const restore = () => { document.body.classList.remove('printing'); document.title = title; window.removeEventListener('afterprint', restore); };
+  document.title = minutesFile(ctx.date || todayStr());
+  document.body.classList.add('printing');
+  window.addEventListener('afterprint', restore);
+  window.print();
 }
 
 /* ===================== ② 내역 탭 ===================== */
@@ -1032,7 +1298,31 @@ function renderList() {
   $('#listBody').innerHTML = html;
 }
 
+function corpCard(m) {
+  const c = m.corp, retLeft = c.people.filter(p => p.trip && !c.returned?.[p.name]).length;
+  return `
+    <div class="card meal" data-id="${m.id}">
+      <div class="meal-top">
+        <span class="badge corp">회의비</span>
+        <b class="meal-place">${esc(m.place || '(식당 미입력)')}</b>
+        <span class="meal-total">${won(m.total)}</span>
+      </div>
+      ${c.purpose ? `<div class="meal-memo">${esc(c.purpose)}</div>` : ''}
+      <div class="shares">${c.people.map(p => `<span class="share ${p.sign ? 'corp' : ''}">${p.sign ? '결의 · ' : ''}${esc(p.name)}${p.trip ? ' ✈' : ''}</span>`).join('')}</div>
+      ${m.memo ? `<div class="meal-memo">메모 · ${esc(m.memo)}</div>` : ''}
+      <div class="meal-foot">
+        ${c.resolved ? '<span class="badge ok">결의 완료</span>' : '<span class="badge corp-wait">지출결의 대기</span>'}
+        ${retLeft ? `<span class="badge corp-wait">ERP 반납 ${retLeft}건</span>` : ''}
+        <span class="spacer"></span>
+        ${c.resolved ? '<button class="linkbtn" data-act="unresolve">완료 취소</button>' : ''}
+        <button class="linkbtn" data-act="edit">수정</button>
+        <button class="linkbtn danger" data-act="del">삭제</button>
+      </div>
+    </div>`;
+}
+
 function mealCard(m) {
+  if (isCorp(m)) return corpCard(m);
   const done = isDone(m);
   const anyPaid = m.participants.some(id => isPaid(m, id));
   const shares = m.participants.map(id => {
@@ -1072,6 +1362,15 @@ $('#listBody').addEventListener('click', e => {
   const id = e.target.closest('.meal').dataset.id;
   const m = state.meals.find(x => x.id === id); if (!m) return;
 
+  if (act === 'unresolve') {
+    m.corp.resolved = null; saveState(); renderList();
+    return toast('지출결의 완료를 취소했어요');
+  }
+  if (act === 'edit' && isCorp(m)) {
+    form = { ...blankForm({ date: m.date, type: '회식' }), editId: m.id, place: m.place, memo: m.memo || '',
+      pay: 'corp', corp: { ...cloneCorp(m.corp), total: m.total } };
+    return showTab('record');
+  }
   if (act === 'edit') {
     form = {
       editId: m.id, date: m.date, type: m.type, place: m.place, split: m.split,
@@ -1257,6 +1556,88 @@ function paidBatches() {
   return Object.values(map).sort((a, b) => b.ts - a.ts).slice(0, 10);
 }
 
+/* --- 정산 탭 회의비 보기: 이번 달 예산, 지출결의 대기, ERP 반납 메모, 특이사항 --- */
+let settleView = 'team';
+// 출장 표시한 사람마다 반납 메모 한 줄 (결의서 이름 여부와 무관)
+const corpReturns = () => state.meals.filter(isCorp)
+  .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
+  .flatMap(m => m.corp.people.filter(p => p.trip).map(p => ({ m, name: p.name, done: m.corp.returned?.[p.name] || null })));
+const corpByDate = () => state.meals.filter(isCorp).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+
+function corpSettleHtml() {
+  const month = todayStr().slice(0, 7), budget = state.corp.budget;
+  const mMeals = corpByDate().filter(m => m.date.startsWith(month)), used = mMeals.reduce((a, m) => a + m.total, 0);
+  let html = `
+    <section class="card budget">
+      <div class="sub">${Number(month.slice(5))}월 회의비 예산</div>
+      <div class="big">${budget ? (used <= budget ? `${won(budget - used)} 남음` : `${won(used - budget)} 초과`) : won(used)}</div>
+      ${budget ? `<div class="bar"><i class="${used > budget ? 'over' : ''}" style="width:${Math.min(100, used / budget * 100)}%"></i></div>` : ''}
+      <div class="r"><span>사용 ${won(used)} · ${mMeals.length}건</span><span>${budget ? `예산 ${won(budget)}` : '설정에서 예산을 넣어 주세요'}</span></div>
+    </section>`;
+
+  const wait = corpByDate().filter(m => !m.corp.resolved);
+  html += `<div class="card"><div class="label"><span class="strong">지출결의 대기</span><span class="sub">${wait.length}건</span></div>`;
+  html += wait.length ? wait.map(m => {
+    const names = signed(m.corp).map(p => p.name), filled = minutesFilled(m.corp.minutes);
+    return `<div class="citem" data-id="${m.id}">
+      <div><b>${fmtDate(m.date)} ${esc(m.place || '회식')} · ${won(m.total)}</b>
+        <div class="sub">${m.corp.purpose ? esc(m.corp.purpose) + ' · ' : ''}${esc(names.join(', '))} (1인 ${won(m.total / (names.length || 1))})</div></div>
+      <div class="cbtns">
+        <button class="cbtn" data-c="copy">결의 복사</button>
+        <button class="cbtn ${filled ? '' : 'todo'}" data-c="minutes">${filled ? '회의록 PDF' : '회의록 쓰기'}</button>
+        <button class="cbtn fill" data-c="done">완료</button>
+      </div></div>`;
+  }).join('') : '<p class="hint" style="margin:0">대기 중인 지출결의가 없어요.</p>';
+  html += '</div>';
+
+  // 반납 메모: 안 한 것 + 이번 달에 체크한 것(줄 그음)
+  const rets = corpReturns().filter(r => !r.done || r.m.date.startsWith(month));
+  const fee = r => r.m.corp.tripFee;
+  html += `<div class="card"><div class="label"><span class="strong">ERP 식비 반납 메모</span><span class="sub">${state.corp.tripFee ? `출장 1식 ${won(state.corp.tripFee)}` : ''}</span></div>`;
+  html += rets.length ? rets.map(r => `
+    <label class="ret ${r.done ? 'done' : ''}">
+      <input type="checkbox" data-ret="${r.m.id}" data-name="${esc(r.name)}" ${r.done ? 'checked' : ''}>
+      <span class="grow"><b>${esc(r.name)}</b> <span class="sub">${fmtDate(r.m.date)} ${esc(r.m.place || '회식')} · 회의비 회식</span></span>
+      <b>${fee(r) ? won(fee(r)) : ''}</b>
+    </label>`).join('') + (rets.some(r => !r.done) ? '<button class="btn small mt" data-c="copy-ret" style="width:100%">반납할 것만 한꺼번에 복사</button>' : '')
+    : '<p class="hint" style="margin:0">출장 중 반납할 식비가 없어요.</p>';
+  html += '<p class="hint">ERP에 입력한 뒤 체크하세요.</p></div>';
+
+  const memos = mMeals.filter(m => m.memo);
+  if (memos.length) html += `<div class="card"><div class="label"><span class="strong">특이사항 메모</span><span class="sub">이번 달</span></div>
+    ${memos.map(m => `<div class="drow"><span>${fmtDate(m.date)} ${esc(m.place || '회식')}</span><span>${esc(m.memo)}</span></div>`).join('')}</div>`;
+  return html;
+}
+// 지출결의에 붙여넣을 글
+function corpText(m) {
+  const c = m.corp, names = signed(c).map(p => p.name), d = parseDate(m.date);
+  return [
+    '[회의비 사용 내역]',
+    `일시: ${m.date}(${DOW[d.getDay()]})`,
+    `장소: ${m.place || '-'}`,
+    c.purpose && `목적: ${c.purpose}`,
+    `참석자(${names.length}명): ${names.join(', ')}`,
+    `사용 금액: ${won(m.total)} (1인 ${won(m.total / (names.length || 1))})`,
+    m.memo && `특이사항: ${m.memo}`,
+  ].filter(Boolean).join('\n');
+}
+async function corpAction(act, id) {
+  if (act === 'copy-ret') {
+    const text = corpReturns().filter(r => !r.done).map(r => `${fmtDate(r.m.date)} ${r.name} ${r.m.place || '회식'} 회의비 회식${r.m.corp.tripFee ? ' ' + won(r.m.corp.tripFee) : ''}`).join('\n');
+    return toast((await copyText(text)) ? '반납할 내역을 복사했어요' : '복사에 실패했어요');
+  }
+  const m = state.meals.find(x => x.id === id); if (!m) return;
+  if (act === 'copy') return toast((await copyText(corpText(m))) ? '지출결의 내용을 복사했어요' : '복사에 실패했어요');
+  if (act === 'minutes') {
+    const ctx = { corp: m.corp, date: m.date, place: m.place, mealId: m.id, onClose: () => { saveState(); renderSettle(); } };
+    return minutesFilled(m.corp.minutes) ? openPdfPreview(ctx) : openMinutes(ctx);
+  }
+  if (act === 'done') {
+    m.corp.resolved = Date.now(); saveState(); renderSettle();
+    toast(`${fmtDate(m.date)} ${m.place || '회식'} 지출결의 완료`, '되돌리기', () => { m.corp.resolved = null; saveState(); renderSettle(); });
+  }
+}
+
 function renderSettle() {
   const per = outstanding();
   const ids = personIds(per);
@@ -1267,6 +1648,16 @@ function renderSettle() {
   const saved = ids.reduce((a, id) => a + per[id].items.reduce((b, x) => b + voucherSaved(x.m, id), 0), 0);
   const canShare = !!navigator.share;
   let html = '';
+
+  // 팀원 정산 / 회의비 전환 (회의비 기록이 있을 때만)
+  const corpMeals = state.meals.filter(isCorp);
+  if (corpMeals.length) {
+    const todo = corpMeals.filter(m => !m.corp.resolved).length + corpReturns().filter(r => !r.done).length;
+    html += `<div class="seg settle-seg" role="group" aria-label="정산 종류">
+      <button data-sv="team" class="${settleView === 'team' ? 'on' : ''}">팀원 정산 · ${won(total)}</button>
+      <button data-sv="corp" class="${settleView === 'corp' ? 'on' : ''}">회의비${todo ? ` · 할 일 ${todo}` : ''}</button></div>`;
+    if (settleView === 'corp') { $('#settleBody').innerHTML = html + corpSettleHtml(); return; }
+  }
 
   // 요약
   html += `
@@ -1279,7 +1670,8 @@ function renderSettle() {
 
   // 이번 주(월~일) 식비: 전체 결제액과 그중 내 몫 (상품권 할인 반영된 실제 금액)
   const mon = mondayOf(todayStr()), sun = addDays(mon, 6);
-  const week = state.meals.filter(m => m.date >= mon && m.date <= sun);
+  const week = state.meals.filter(m => !isCorp(m) && m.date >= mon && m.date <= sun);
+  const wCorp = state.meals.filter(m => isCorp(m) && m.date >= mon && m.date <= sun).reduce((a, m) => a + m.total, 0);
   const wTotal = week.reduce((a, m) => a + m.total, 0);
   const wMine = week.reduce((a, m) => a + (m.shares.me || 0), 0);
   const wDinner = week.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0);
@@ -1291,6 +1683,7 @@ function renderSettle() {
         <div><span class="sub">내가 쓴 금액</span><b>${won(wMine)}</b></div>
       </div>
       ${wDinner ? `<p class="hint">전체 중 점심 ${won(wTotal - wDinner)} · 회식 ${won(wDinner)}</p>` : ''}
+      ${wCorp ? `<p class="hint">회의비(법인카드) ${won(wCorp)}은 내 돈이 아니라 따로 봐요.</p>` : ''}
     </div>`;
 
   // 사람별
@@ -1410,6 +1803,10 @@ async function copyText(text) {
 }
 
 $('#settleBody').addEventListener('click', async e => {
+  const sv = e.target.closest('[data-sv]')?.dataset.sv;
+  if (sv) { settleView = sv; return renderSettle(); }
+  const c = e.target.closest('[data-c]');
+  if (c) return corpAction(c.dataset.c, c.closest('[data-id]')?.dataset.id);
   const undo = e.target.closest('[data-undo]')?.dataset.undo;
   if (undo) { const [id, ts] = undo.split('|'); return undoPaid(id, Number(ts)); }
 
@@ -1442,6 +1839,12 @@ $('#settleBody').addEventListener('click', async e => {
 });
 $('#settleBody').addEventListener('change', e => {
   if (e.target.id === 'detailChk') { state.includeDetail = e.target.checked; saveState(); renderSettle(); }
+  if (e.target.dataset.ret) {   // ERP 반납 체크
+    const m = state.meals.find(x => x.id === e.target.dataset.ret); if (!m) return;
+    const name = e.target.dataset.name, ret = (m.corp.returned ||= {});
+    if (e.target.checked) ret[name] = Date.now(); else delete ret[name];
+    saveState(); renderSettle();
+  }
 });
 
 /* ===================== ④ 설정 탭 ===================== */
@@ -1457,6 +1860,7 @@ function renderSettings() {
   renderXlsxHint();
   $('#sAskMenu').checked = state.askMenuSave;
   renderMenuBook();
+  renderCorpSettings();
   const used = usedIds();
   const others = state.members.filter(m => m.id !== 'me');
   $('#memberList').innerHTML = others.length ? others.map(m => `
@@ -1533,6 +1937,35 @@ $('#sAskMenu').addEventListener('change', e => {
   toast(e.target.checked ? '기록을 저장할 때 식당·메뉴 저장을 물어볼게요' : '이제 식당·메뉴를 자동으로 저장하지 않아요');
 });
 
+// 회의비 기본값 (새 회의비 기록에만 적용)
+function renderCorpSettings() {
+  const c = state.corp;
+  $('#sCorpNames').innerHTML = c.names.map((n, i) => `<span>${esc(n)}<button data-i="${i}" aria-label="${esc(n)} 빼기">✕</button></span>`).join('')
+    || '<p class="hint" style="margin:0">기본 명단이 비어 있어요.</p>';
+  $('#sCorpBudget').value = c.budget ? fmt(c.budget) : '';
+  $('#sCorpLimit').value = c.limit ? fmt(c.limit) : '';
+  $('#sCorpTrip').value = c.tripFee ? fmt(c.tripFee) : '';
+  $('#sMinStart').value = c.start; $('#sMinEnd').value = c.end;
+  $('#sMinPlace').value = c.place; $('#sMinNote').value = c.note;
+}
+function addCorpName() {
+  const input = $('#sCorpName'), name = input.value.trim();
+  if (!name) return;
+  if (state.corp.names.includes(name)) return toast('이미 있는 이름이에요');
+  state.corp.names.push(name); saveState(); input.value = ''; renderCorpSettings();
+}
+$('#sCorpAdd').addEventListener('click', addCorpName);
+$('#sCorpName').addEventListener('keydown', e => { if (e.key === 'Enter') addCorpName(); });
+$('#sCorpNames').addEventListener('click', e => {
+  const i = e.target.closest('[data-i]')?.dataset.i; if (i == null) return;
+  state.corp.names.splice(Number(i), 1); saveState(); renderCorpSettings();
+});
+bindAmount($('#sCorpBudget'), v => { state.corp.budget = v; saveState(); });
+bindAmount($('#sCorpTrip'), v => { state.corp.tripFee = v; saveState(); });
+bindAmount($('#sCorpLimit'), v => { state.corp.limit = v; saveState(); });   // 비우면 결의 인원 계산을 안 함
+[['#sMinStart', 'start'], ['#sMinEnd', 'end'], ['#sMinPlace', 'place'], ['#sMinNote', 'note']].forEach(([sel, key]) =>
+  $(sel).addEventListener('change', e => { state.corp[key] = e.target.value.trim(); saveState(); }));
+
 function addMember() {
   const input = $('#newMember');
   const name = input.value.trim();
@@ -1569,7 +2002,7 @@ function downloadBlob(blob, filename) {
 
 // 엑셀 내보내기: 기간 안의 기록 → 시트 3개 (식사별 / 사람별 상세 / 사람별 합계)
 const mealsBetween = (from, to) => state.meals
-  .filter(m => m.date >= from && m.date <= to)
+  .filter(m => !isCorp(m) && m.date >= from && m.date <= to)   // 엑셀은 팀원 정산용이라 회의비 제외
   .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
 
 function renderXlsxHint() {
