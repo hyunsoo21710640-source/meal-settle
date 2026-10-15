@@ -107,6 +107,16 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .irow.menu-only { grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
 .irow.menu-only .menu-input { min-height: 44px; padding: 9px 12px; font-size: 15px; }
 .base-row .iname { color: var(--accent); font-weight: 700; }
+/* 식당 고르기: 저장된 식당이 있으면 칸을 누를 때 박스 목록이 열림 */
+#fPlace[readonly] {
+  cursor: pointer; padding-right: 40px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a6656' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 14px center; background-size: 18px;
+}
+.place-pick { margin-top: 8px; }
+.place-pick[hidden] { display: none; }
+.mchip.on { background: var(--accent-weak); border-color: var(--accent); color: var(--accent); font-weight: 700; }
+.mchip.manual { border-style: dashed; color: var(--accent); font-weight: 700; }
 .menu-pick:empty { display: none; }
 .menu-pick { margin-bottom: 10px; }
 .menu-pick > .sub { display: block; margin-bottom: 6px; font-size: 12px; }
@@ -120,8 +130,23 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .mchip span { font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
 .mchip:active { transform: scale(.97); background: var(--accent-weak); }
 .menu-input.target { border-color: var(--accent); background: var(--card); }
+.mb-add { display: grid; gap: 8px; padding: 12px; background: var(--input); border-radius: 12px; margin-bottom: 14px; }
+.mb-add input[type=text] { background: var(--card); }
+.mb-add-row { display: grid; grid-template-columns: minmax(0, 1fr) 128px; gap: 8px; }
+.mb-head { display: flex; align-items: center; gap: 10px; }
+.mb-head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mb-empty { font-size: 13px; color: var(--sub); padding: 4px 0; border-top: 1px solid var(--line); }
+/* 저장 후 묻는 창 (아래에서 올라오는 시트) */
+.modal { position: fixed; inset: 0; z-index: 30; background: rgba(40, 25, 15, .45); display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+.modal[hidden] { display: none; }
+.modal-box { width: 100%; max-width: 448px; background: var(--card); border-radius: 20px; padding: 20px; margin-bottom: env(safe-area-inset-bottom); }
+.modal-box > b { font-size: 18px; }
+.modal-box > .sub { margin: 4px 0 0; }
+#menuAskList { list-style: none; margin: 12px 0; padding: 10px 14px; background: var(--input); border-radius: 12px; font-size: 14px; max-height: 40vh; overflow: auto; }
+#menuAskList li { padding: 3px 0; }
+#menuAskList li span { color: var(--sub); font-size: 12px; margin-left: 4px; }
 .mb-place + .mb-place { margin-top: 12px; }
-.mb-head { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.mb-head { font-size: 14px; margin-bottom: 4px; }
 .mb-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line); font-size: 14px; }
 .mb-row span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .base-hint { margin: -2px 0 12px; }

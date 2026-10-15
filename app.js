@@ -24,6 +24,7 @@ function defaultState() {
     meals: [],
     lastParticipants: ['me'],
     includeDetail: false,
+    askMenuSave: true,         // 기록 저장 후 새 식당·메뉴를 저장할지 묻기 (끄면 자동 저장 안 함)
   };
 }
 
@@ -39,9 +40,15 @@ function loadState() {
 }
 // 저장된 메뉴가 없던 예전 데이터는 지난 기록의 메뉴로 한 번 채움 (오래된 것부터 → 최근 가격이 남음)
 function ensureMenuBook() {
-  if (state.menuBook) return;
-  state.menuBook = {};
-  [...state.meals].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt).forEach(rememberMenus);
+  if (!state.menuBook) {
+    state.menuBook = {};
+    [...state.meals].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt).forEach(rememberMenus);
+  }
+  // 식당 목록이 생기기 전 기록의 식당도 한 번 등록 (메뉴 없는 식당 포함)
+  if (!state.placesSeeded) {
+    state.meals.forEach(m => { if (m.place) state.menuBook[m.place] ||= {}; });
+    state.placesSeeded = true;
+  }
 }
 function saveState() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
@@ -602,11 +609,9 @@ function renderRecord() {
   $('#editBanner').hidden = !form.editId;
   $('#saveBtn').textContent = form.editId ? '수정 완료' : '저장';
 
-  // 자주 간 식당 자동완성
-  const cnt = {};
-  state.meals.forEach(m => { if (m.place) cnt[m.place] = (cnt[m.place] || 0) + 1; });
-  $('#placeList').innerHTML = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).slice(0, 30)
-    .map(p => `<option value="${esc(p)}">`).join('');
+  // 저장된 식당이 아닌 이름(수정 중인 기록 등)이면 직접 입력 상태로
+  placeManual = !!form.place && !savedPlaces().includes(form.place);
+  renderPlaceField(); $('#placePick').hidden = true;
   renderPeople();
   renderSplitBoxes();
 }
@@ -701,15 +706,65 @@ function renderMenuPick() {
   });
   $$('.menu-input').forEach(i => i.classList.toggle('target', (i.dataset.menu || 'base') === menuTarget && names.length > 0));
 }
-// 저장할 때 이 기록의 메뉴·가격을 등록 (같은 메뉴는 최근 가격으로 덮어씀)
+// 기록의 메뉴별 가격 (개별 금액만, 1/N은 0 = 모름)
+function menuPrices(meal) {
+  const out = {};
+  Object.entries(meal.menus || {}).forEach(([id, menu]) => {
+    out[menu] = (meal.split === 'individual' ? meal.items[id] || 0 : 0) || out[menu] || 0;
+  });
+  return out;
+}
+// 이 기록의 식당·메뉴·가격을 등록 (같은 메뉴는 최근 가격으로 덮어씀)
 function rememberMenus(meal) {
-  if (!meal.menus) return;
+  if (!meal.place && !meal.menus) return;
   const book = (state.menuBook[meal.place] ||= {});
-  Object.entries(meal.menus).forEach(([id, menu]) => {
-    const price = meal.split === 'individual' ? meal.items[id] || 0 : 0;
-    book[menu] = price || book[menu] || 0;
+  Object.entries(menuPrices(meal)).forEach(([menu, price]) => (book[menu] = price || book[menu] || 0));
+}
+// 저장하면 새로 생기거나 바뀌는 것 (저장할지 물을 때 보여줌)
+function menuChanges(meal) {
+  const book = state.menuBook[meal.place], out = [];
+  if (meal.place && !book) out.push([meal.place, '새 식당']);
+  Object.entries(menuPrices(meal)).forEach(([menu, price]) => {
+    const old = book?.[menu];
+    if (old === undefined) out.push([`${menu}${price ? ' ' + won(price) : ''}`, '새 메뉴']);
+    else if (price && price !== old) out.push([`${menu} ${old ? won(old) + ' → ' : ''}${won(price)}`, old ? '가격 변경' : '가격 추가']);
+  });
+  return out;
+}
+// 저장 후 묻는 창. { save, never }로 답함
+function askMenuSave(changes) {
+  $('#menuAskList').innerHTML = changes.map(([t, k]) => `<li>${esc(t)}<span>${k}</span></li>`).join('');
+  $('#menuAskNever').checked = false;
+  $('#menuAsk').hidden = false;
+  return new Promise(res => {
+    $('#menuAsk').onclick = e => {
+      const ans = e.target.closest('[data-ans]')?.dataset.ans; if (!ans) return;
+      $('#menuAsk').hidden = true;
+      res({ save: ans === 'yes', never: $('#menuAskNever').checked });
+    };
   });
 }
+
+// 식당 칸: 저장된 식당이 있으면 누를 때 박스 목록, '직접 입력'을 고르면 키보드로 입력
+let placeManual = false;
+function savedPlaces() {
+  const cnt = {};
+  state.meals.forEach(m => (cnt[m.place] = (cnt[m.place] || 0) + 1));
+  return Object.keys(state.menuBook).filter(Boolean).sort((a, b) => (cnt[b] || 0) - (cnt[a] || 0) || a.localeCompare(b, 'ko'));
+}
+function renderPlaceField() {
+  const pick = savedPlaces().length > 0 && !placeManual;
+  $('#fPlace').readOnly = pick;
+  $('#fPlace').placeholder = pick ? '눌러서 식당 고르기' : '예: 시골국밥';
+  $('#placeBack').hidden = pick || !savedPlaces().length;
+}
+function openPlacePick(open) {
+  $('#placePick').hidden = !open;
+  if (!open) return;
+  $('#placePick').innerHTML = savedPlaces().map(p => `<button class="mchip ${p === form.place ? 'on' : ''}" data-place="${esc(p)}">${esc(p)}</button>`).join('')
+    + '<button class="mchip manual" data-manual>✎ 직접 입력</button>';
+}
+function setPlace(v) { form.place = v; $('#fPlace').value = v; renderFillLast(); renderMenuPick(); }
 // 아는 메뉴를 고르면 지난번 가격을 넣음. 비어 있거나 자동으로 넣었던 칸만 (직접 쓴 금액은 그대로)
 function fillPrice(menu, id) {
   const price = form.split === 'individual' && bookAt(form.place)[menu.trim()];
@@ -772,6 +827,16 @@ $('#fType').addEventListener('click', e => {
   renderSplitBoxes();
 });
 $('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); renderMenuPick(); });
+$('#fPlace').addEventListener('click', () => { if ($('#fPlace').readOnly) openPlacePick($('#placePick').hidden); });
+$('#placePick').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  openPlacePick(false);
+  if (b.dataset.place != null) { placeManual = false; setPlace(b.dataset.place); renderPlaceField(); return; }
+  placeManual = true; setPlace(''); renderPlaceField(); $('#fPlace').focus();
+});
+$('#placeBack').addEventListener('click', () => { placeManual = false; setPlace(''); renderPlaceField(); openPlacePick(true); });
+// 목록 밖을 누르면 닫음
+document.addEventListener('click', e => { if (!e.target.closest('#fPlace, #placePick, #placeBack')) $('#placePick').hidden = true; });
 $('#fMemo').addEventListener('input', e => (form.memo = e.target.value));
 $('#fVoucher').addEventListener('change', e => { form.voucher = e.target.checked; renderVoucher(); renderPreview(); });
 
@@ -929,14 +994,22 @@ function saveMeal() {
     state.meals.push(meal);
   }
   state.lastParticipants = ids;
-  rememberMenus(meal);
+  const changes = state.askMenuSave ? menuChanges(meal) : [];   // 묻기를 끈 경우 자동 저장 안 함
   saveState();
 
   form = blankForm({ date: meal.date, type: meal.type });
-  if (wasEdit) { showTab('list'); toast('수정했어요'); return; }   // showTab이 토스트를 닫으므로 그 뒤에 표시
-  renderRecord(); renderTop();
-  window.scrollTo(0, 0);
-  toast(`저장했어요 · ${meal.place || meal.type} ${won(total)}`);
+  if (wasEdit) showTab('list');
+  else { renderRecord(); renderTop(); window.scrollTo(0, 0); }
+  // showTab이 토스트를 닫으므로 화면을 바꾼 뒤에 표시
+  const done = saved => toast((wasEdit ? '수정했어요' : `저장했어요 · ${meal.place || meal.type} ${won(total)}`) + (saved ? ' · 식당·메뉴도 저장' : ''));
+  if (!changes.length) return done(false);
+  askMenuSave(changes).then(({ save, never }) => {
+    if (save) rememberMenus(meal);
+    if (never) state.askMenuSave = false;
+    saveState();
+    if (save && !wasEdit) renderRecord();   // 새 식당을 바로 고를 수 있게
+    done(save);
+  });
 }
 
 /* ===================== ② 내역 탭 ===================== */
@@ -1382,6 +1455,7 @@ function renderSettings() {
   if (!$('#xFrom').value) $('#xFrom').value = todayStr().slice(0, 8) + '01';   // 기본: 이번 달 1일 ~ 오늘
   if (!$('#xTo').value) $('#xTo').value = todayStr();
   renderXlsxHint();
+  $('#sAskMenu').checked = state.askMenuSave;
   renderMenuBook();
   const used = usedIds();
   const others = state.members.filter(m => m.id !== 'me');
@@ -1411,23 +1485,52 @@ $('#sVoucher').addEventListener('change', e => {
 });
 
 function renderMenuBook() {
-  const places = Object.keys(state.menuBook).filter(p => Object.keys(state.menuBook[p]).length).sort();
-  $('#menuBookList').innerHTML = places.length ? places.map(p => `
+  // 식당 이름 없이 저장된 메뉴('')는 메뉴가 있을 때만 보임
+  const places = Object.keys(state.menuBook).filter(p => p || Object.keys(state.menuBook[p]).length).sort((a, b) => a.localeCompare(b, 'ko'));
+  $('#menuBookList').innerHTML = places.length ? places.map(p => {
+    const menus = Object.entries(state.menuBook[p]);
+    return `
     <div class="mb-place" data-place="${esc(p)}">
-      <div class="mb-head">${esc(p || '(식당 미입력)')}</div>
-      ${Object.entries(state.menuBook[p]).map(([n, v]) => `
-        <div class="mb-row"><span>${esc(n)}</span><span class="sub">${v ? won(v) : '가격 없음'}</span><button class="linkbtn danger" data-del="${esc(n)}">삭제</button></div>`).join('')}
-    </div>`).join('')
-    : '<p class="hint" style="margin:0">아직 저장된 메뉴가 없어요. 기록에 메뉴를 넣고 저장하면 여기에 생겨요.</p>';
+      <div class="mb-head"><b>${esc(p || '(식당 미입력)')}</b>
+        ${p ? '<button class="linkbtn" data-add-to>메뉴 추가</button>' : ''}<button class="linkbtn danger" data-del-place>식당 삭제</button></div>
+      ${menus.length ? menus.map(([n, v]) => `
+        <div class="mb-row"><span>${esc(n)}</span><span class="sub">${v ? won(v) : '가격 없음'}</span><button class="linkbtn danger" data-del="${esc(n)}">삭제</button></div>`).join('')
+        : '<div class="mb-empty">저장된 메뉴 없음</div>'}
+    </div>`;
+  }).join('')
+    : '<p class="hint" style="margin:0">아직 저장된 식당이 없어요. 위에서 추가하거나, 기록을 저장할 때 저장하세요.</p>';
 }
 $('#menuBookList').addEventListener('click', e => {
+  const box = e.target.closest('.mb-place'); if (!box) return;
+  const place = box.dataset.place;
+  if (e.target.closest('[data-add-to]')) { $('#mbPlace').value = place; $('#mbMenu').focus(); return; }
+  if (e.target.closest('[data-del-place]')) {
+    const old = state.menuBook[place], n = Object.keys(old).length;
+    if (n && !confirm(`${place || '(식당 미입력)'}와 메뉴 ${n}개를 지울까요?`)) return;
+    delete state.menuBook[place];
+    saveState(); renderMenuBook();
+    return toast(`${place || '(식당 미입력)'}을 지웠어요`, '되돌리기', () => { state.menuBook[place] = old; saveState(); renderMenuBook(); });
+  }
   const name = e.target.closest('[data-del]')?.dataset.del; if (name == null) return;
-  const place = e.target.closest('.mb-place').dataset.place;
   const price = state.menuBook[place][name];
   delete state.menuBook[place][name];
-  if (!Object.keys(state.menuBook[place]).length) delete state.menuBook[place];
   saveState(); renderMenuBook();
   toast(`${name} 메뉴를 지웠어요`, '되돌리기', () => { (state.menuBook[place] ||= {})[name] = price; saveState(); renderMenuBook(); });
+});
+// 설정에서 식당·메뉴 미리 추가 (메뉴를 비우면 식당만)
+bindAmount($('#mbPrice'), () => {});
+$('#mbAdd').addEventListener('click', () => {
+  const place = $('#mbPlace').value.trim(), menu = $('#mbMenu').value.trim(), price = toNum($('#mbPrice').value);
+  if (!place) return toast('식당 이름을 넣어 주세요');
+  const book = (state.menuBook[place] ||= {});
+  if (menu) book[menu] = price || book[menu] || 0;
+  saveState(); renderMenuBook();
+  $('#mbMenu').value = ''; $('#mbPrice').value = '';   // 같은 식당 메뉴를 이어서 넣기 쉽게 식당은 남김
+  toast(menu ? `${place} · ${menu} 저장했어요` : `${place} 저장했어요`);
+});
+$('#sAskMenu').addEventListener('change', e => {
+  state.askMenuSave = e.target.checked; saveState();
+  toast(e.target.checked ? '기록을 저장할 때 식당·메뉴 저장을 물어볼게요' : '이제 식당·메뉴를 자동으로 저장하지 않아요');
 });
 
 function addMember() {
