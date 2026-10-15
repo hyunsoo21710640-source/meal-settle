@@ -484,9 +484,6 @@ textarea:focus { border-color: var(--accent); }
 .settings-seg button[data-v="corp"].on { color: var(--corp-ink); }
 #mDateIn { margin-bottom: 0; }
 .sticky-action .btn:disabled { background: var(--seg); border-color: var(--seg); color: var(--sub); opacity: 1; }
-/* 할인 전 가격: 빨간 사선 */
-s.was { position: relative; text-decoration: none; color: var(--sub); font-weight: 400; white-space: nowrap; }
-s.was::after { content: ''; position: absolute; left: -2px; right: -2px; top: 50%; border-top: 1.6px solid #d93025; transform: rotate(-14deg); }
 /* 주차별 미입금 카드 */
 .wk-list { display: flex; flex-direction: column; gap: 8px; }
 .wk { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); background: var(--card); border-radius: 14px; text-align: left; font: inherit; color: var(--text); }
@@ -496,3 +493,14 @@ s.was::after { content: ''; position: absolute; left: -2px; right: -2px; top: 50
 .wk.on { border-color: var(--accent); background: var(--accent-weak); }
 .wk.on .ck { background: var(--accent); border-color: var(--accent); }
 .wk:not(.on) .wk-amt, .wk:not(.on) b { color: var(--sub); }
+/* 이번 달 상품권 할인 카드 (카드사 '할인 받았어요' 화면 모양) */
+.disc .disc-big { font-size: 22px; font-weight: 700; margin: 2px 0 12px; letter-spacing: -.3px; }
+.disc-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 0; border: 0; border-top: 1px solid var(--line); background: none; font: inherit; color: var(--text); text-align: left; }
+.disc-toggle > svg:first-child { width: 24px; height: 24px; color: var(--ok); flex: none; }
+.disc-toggle .grow { flex: 1; display: flex; flex-direction: column; }
+.disc-toggle .chev { width: 20px; height: 20px; color: var(--sub); transition: transform .2s; }
+.disc-toggle .chev.up { transform: rotate(180deg); }
+.disc-list { padding-top: 4px; }
+.disc-row { display: flex; justify-content: space-between; gap: 10px; padding: 9px 0; font-size: 15px; color: var(--sub); }
+.disc-row span:last-child { font-variant-numeric: tabular-nums; }
+.disc-row.total { color: var(--text); font-size: 16px; padding: 12px 0 10px; }

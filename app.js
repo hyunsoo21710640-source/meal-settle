@@ -1427,13 +1427,8 @@ function buildMessage(per, ids) {
     const hasOld = p.items.some(x => x.m.date < thisWeek);
     const saved = p.items.reduce((a, x) => a + voucherSaved(x.m, id), 0);
     const notes = [hasOld && '지난 미입금 포함', saved && `상품권 ${won(saved)} 할인`].filter(Boolean);
-    // 상품권 할인이 있으면 할인 전 → 할인 후 금액을 같이 보여 줌
-    const amt = saved ? `${won(p.amt + saved)} → ${won(p.amt)}` : won(p.amt);
-    lines.push(`${nameOf(id)} ${amt}${notes.length ? ` (${notes.join(', ')})` : ''}`);
-    if (state.includeDetail) p.items.forEach(x => {
-      const s = voucherSaved(x.m, id);
-      lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${s ? `${won(x.amt + s)} → ` : ''}${won(x.amt)}`);
-    });
+    lines.push(`${nameOf(id)} ${won(p.amt)}${notes.length ? ` (${notes.join(', ')})` : ''}`);
+    if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${won(x.amt)}`));
   });
   const vMeals = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m)))].filter(m => m.voucher)
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
@@ -1444,7 +1439,7 @@ function buildMessage(per, ids) {
       const others = m.participants.filter(id => id !== 'me').map(id => voucherSaved(m, id));
       const same = others.length && others.every(v => v === others[0]);
       const per = same ? `1인 ${won(others[0])}` : `1인 평균 ${won((m.voucher.gross - m.total) / m.participants.length)}`;
-      lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% · ${won(m.voucher.gross)} → ${won(m.total)} (총 ${won(m.voucher.gross - m.total)}, ${per} 할인)`);
+      lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% 할인 · 총 ${won(m.voucher.gross - m.total)} (${per})`);
     });
   }
   if (state.account) lines.push('', `입금 계좌: ${state.account}`);
@@ -1681,9 +1676,8 @@ function settlePer() {
   if (!settleWeeks || !settleWeeks.size) settleWeeks = new Set(weeks.length ? [weeks[0].mon] : []);
   return { all, weeks, per: pickedPer(all, settleWeeks) };
 }
-// 메시지 미리보기: 할인 전 금액('22,000원 → ')에 빨간 사선. 복사되는 글은 그대로
-const msgHtml = msg => esc(msg).replace(/([\d,]+원) → /g, '<s class="was">$1</s> ');
-let lastMsg = '';
+let lastMsg = '';    // 복사·공유할 정산 메시지
+let discOpen = true; // '할인 받았어요' 카드 펼침
 
 function renderSettle() {
   const { all, weeks, per } = settlePer();
@@ -1693,7 +1687,6 @@ function renderSettle() {
   const mealCount = new Set(ids.flatMap(id => per[id].items.map(x => x.m.id))).size;
   const msg = buildMessage(per, ids);
   const batches = paidBatches();
-  const saved = ids.reduce((a, id) => a + per[id].items.reduce((b, x) => b + voucherSaved(x.m, id), 0), 0);
   const canShare = !!navigator.share;
   let html = '';
 
@@ -1713,7 +1706,6 @@ function renderSettle() {
       <div class="sub">${weeks.length > 1 ? '이번에 받을 돈 (켠 주)' : '아직 받을 돈'}</div>
       <div class="big">${won(total)}</div>
       <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명${allTotal !== total ? ` · 전체 미입금 ${won(allTotal)}` : ''}` : '모두 정산됐어요'}</div>
-      ${saved ? `<div class="save-line">지역상품권으로 팀원 몫 ${won(saved)} 할인됐어요</div>` : ''}
     </div>`;
 
   // 주차별 미입금 카드: 누르면 이번 정산에 넣기·빼기
@@ -1728,6 +1720,28 @@ function renderSettle() {
           <b class="wk-amt">${won(w.amt)}</b>
         </button>`;
       }).join('') + '</div></div>';
+  }
+
+  // 이번 달 상품권 할인 (카드사 '할인 받았어요' 화면처럼 총액 + 펼치면 기록별 목록)
+  const month = todayStr().slice(0, 7);
+  const vMeals = state.meals.filter(m => !isCorp(m) && m.voucher && m.date.startsWith(month))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
+  if (vMeals.length) {
+    const disc = vMeals.reduce((a, m) => a + m.voucher.gross - m.total, 0);
+    html += `
+      <div class="card disc">
+        <div class="sub">이번 달에</div>
+        <div class="disc-big">${won(disc)}을 할인 받았어요!</div>
+        <button class="disc-toggle" data-disc aria-expanded="${discOpen}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>
+          <span class="grow"><b>지역상품권 할인 보기</b><span class="sub">상품권으로 결제한 기록 ${vMeals.length}건</span></span>
+          <svg class="chev ${discOpen ? 'up' : ''}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        ${discOpen ? `<div class="disc-list">
+          <div class="disc-row total"><b>총 할인</b><b>${won(disc)}</b></div>
+          ${vMeals.map(m => `<div class="disc-row"><span>${fmtDate(m.date)} ${esc(m.place || m.type)} <span class="sub">${m.voucher.rate}%</span></span><span>${won(m.voucher.gross - m.total)}</span></div>`).join('')}
+        </div>` : ''}
+      </div>`;
   }
 
   // 이번 주(월~일) 식비: 전체 결제액과 그중 내 몫 (상품권 할인 반영된 실제 금액)
@@ -1765,7 +1779,7 @@ function renderSettle() {
             <button class="btn small ok" data-act="paid">입금 확인</button>
           </div>
           <div class="person-detail" ${open ? '' : 'hidden'}>
-            ${p.items.map(x => `<div class="drow ${daysAgo(x.m.date) > LATE_DAYS ? 'late' : ''}"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${voucherSaved(x.m, id) ? `<s class="was">${won(x.amt + voucherSaved(x.m, id))}</s> ` : ''}${won(x.amt)}</span></div>`).join('')}
+            ${p.items.map(x => `<div class="drow ${daysAgo(x.m.date) > LATE_DAYS ? 'late' : ''}"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
             <div class="pd-actions">
               <button class="linkbtn" data-act="msg">${esc(nameOf(id))}에게 보낼 메시지 복사</button>
               ${canShare ? '<button class="linkbtn" data-act="msg-share">공유</button>' : ''}
@@ -1780,7 +1794,7 @@ function renderSettle() {
       <div class="card">
         <div class="label">정산 메시지</div>
         <label class="check"><input type="checkbox" id="detailChk" ${state.includeDetail ? 'checked' : ''}> 날짜별 상세 내역 포함</label>
-        <pre class="msg" id="msgBox">${msgHtml(msg)}</pre>
+        <pre class="msg" id="msgBox">${esc(msg)}</pre>
         <div class="btnrow">
           <button class="btn primary" id="copyBtn">메시지 복사</button>
           ${canShare ? '<button class="btn" id="shareBtn">카톡 등으로 공유</button>' : ''}
@@ -1870,6 +1884,7 @@ async function copyText(text) {
 $('#settleBody').addEventListener('click', async e => {
   const sv = e.target.closest('[data-sv]')?.dataset.sv;
   if (sv) { settleView = sv; return renderSettle(); }
+  if (e.target.closest('[data-disc]')) { discOpen = !discOpen; return renderSettle(); }
   const wk = e.target.closest('[data-wk]')?.dataset.wk;
   if (wk) {
     if (settleWeeks.has(wk)) {
