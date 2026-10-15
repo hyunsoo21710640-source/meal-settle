@@ -480,3 +480,6 @@ textarea:focus { border-color: var(--accent); }
 .card[hidden] { display: none; }
 .budget .sub { color: #fff; font-weight: 500; }
 .label + .citem { border-top: 0; padding-top: 2px; }
+.settings-seg { margin-bottom: 12px; }
+.settings-seg button[data-v="corp"].on { color: var(--corp-ink); }
+#mDateIn { margin-bottom: 0; }

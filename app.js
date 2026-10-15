@@ -869,7 +869,7 @@ $('#pickNone').addEventListener('click', () => {
   form.participants = [];
   renderPeople(); renderSplitBoxes();
 });
-$('#goSettings').addEventListener('click', () => showTab('settings'));
+$('#goSettings').addEventListener('click', () => { settingsView = 'general'; showTab('settings'); });
 
 $('#fSplit').addEventListener('click', e => {
   const v = e.target.closest('button')?.dataset.v; if (!v) return;
@@ -1098,7 +1098,7 @@ function renderCorpNeed() {
 }
 function renderMinutesCard() {
   const mn = form.corp.minutes, filled = minutesFilled(mn);
-  const info = [mn.start && mn.end ? `${mn.start}~${mn.end}` : '', mn.place, `참석 ${signed(form.corp).length}인`,
+  const info = [mn.date && mn.date !== form.date ? `회의 ${md(mn.date)}` : '', mn.start && mn.end ? `${mn.start}~${mn.end}` : '', mn.place, `참석 ${signed(form.corp).length}인`,
     filled ? `내용 ${(mn.topic.trim() ? 1 : 0) + mn.items.filter(s => s.trim()).length}줄` : ''].filter(Boolean).join(' · ');
   $('#cMinutes').innerHTML = `<span class="grow"><b>회의록</b> <span class="sub">· ${filled ? '작성함' : '아직 안 씀'}</span>
     <span class="sub" style="display:block">${esc(info)}</span></span><span class="go">${filled ? '수정' : '작성'} ›</span>`;
@@ -1175,14 +1175,15 @@ const cloneCorp = c => ({ ...c, people: c.people.map(p => ({ ...p })),
 
 /* --- 회의록 시트: 기록 탭(입력 중)과 정산 탭(저장된 기록)에서 같이 씀. ctx = { corp, date, place, mealId, onClose } --- */
 let mCtx = null;
+// 회의 날짜: 회의록에서 직접 고른 날짜(minutes.date), 없으면 기록 날짜
+const minutesDate = ctx => ctx.corp.minutes.date || ctx.date || todayStr();
 function openMinutes(ctx) {
   mCtx = ctx;
   const mn = ctx.corp.minutes;
   if (!mn.items.length) mn.items.push('');
   if (!mn.notes.length) mn.notes.push('');
-  const d = parseDate(ctx.date || todayStr());
   $('#mFor').textContent = `${fmtDateLong(ctx.date || todayStr())} ${ctx.place || '회식'} 회의비에 붙는 회의록이에요.`;
-  $('#mDate').textContent = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+  $('#mDateIn').value = minutesDate(ctx);
   $('#mStart').value = mn.start || ''; $('#mEnd').value = mn.end || '';
   $('#mPlace').value = mn.place || ''; $('#mTopic').value = mn.topic || '';
   const names = signed(ctx.corp).map(p => p.name);
@@ -1197,7 +1198,7 @@ function renderMinutesLists() {
   const lines = (key, ph) => mn[key].map((v, i) => `
     <div class="mline"><input type="text" data-list="${key}" data-i="${i}" value="${esc(v)}" placeholder="${ph}" aria-label="${key === 'items' ? '세부 항목' : '비고'} ${i + 1}" autocomplete="off">
     <button data-del="${key}" data-i="${i}" aria-label="지우기">✕</button></div>`).join('');
-  $('#mItems').innerHTML = lines('items', '예: 수중조사 범위 및 일정 검토');
+  $('#mItems').innerHTML = lines('items', '예: 일정 검토');
   $('#mNotes').innerHTML = lines('notes', '예: 회의 후 식사');
 }
 function closeMinutes() {
@@ -1209,6 +1210,7 @@ function closeMinutes() {
 $('#minutesSheet').addEventListener('input', e => {
   const t = e.target, mn = mCtx.corp.minutes;
   if (t.dataset.list) mn[t.dataset.list][Number(t.dataset.i)] = t.value;
+  else if (t.id === 'mDateIn') mn.date = t.value;
   else if (t.id === 'mStart') mn.start = t.value;
   else if (t.id === 'mEnd') mn.end = t.value;
   else if (t.id === 'mPlace') mn.place = t.value;
@@ -1238,7 +1240,7 @@ function loadLastMinutes() {
 
 // 원본 양식(A4 테두리, 「회 의 록」, 명조)으로 회의록 HTML
 function minutesHtml(ctx) {
-  const mn = cleanMinutes(ctx.corp.minutes), names = signed(ctx.corp).map(p => p.name), d = parseDate(ctx.date || todayStr());
+  const mn = cleanMinutes(ctx.corp.minutes), names = signed(ctx.corp).map(p => p.name), d = parseDate(minutesDate(ctx));
   const time = mn.start && mn.end ? ` ${mn.start} ∼${mn.end}` : mn.start ? ` ${mn.start}` : '';
   return `<div class="mm-page"><div class="mm-box">
     <h1 class="mm-title">회의록</h1>
@@ -1272,7 +1274,7 @@ async function printMinutes(ctx) {
   try { await Promise.all([document.fonts.load('20px "Nanum Myeongjo"'), document.fonts.load('700 20px "Nanum Myeongjo"')]); } catch (_) { /* 오프라인이면 기본 명조 */ }
   const title = document.title;
   const restore = () => { document.body.classList.remove('printing'); document.title = title; window.removeEventListener('afterprint', restore); };
-  document.title = minutesFile(ctx.date || todayStr());
+  document.title = minutesFile(minutesDate(ctx));
   document.body.classList.add('printing');
   window.addEventListener('afterprint', restore);
   window.print();
@@ -1850,7 +1852,19 @@ $('#settleBody').addEventListener('change', e => {
 /* ===================== ④ 설정 탭 ===================== */
 const usedIds = () => new Set(state.meals.flatMap(m => m.participants));
 
+// 설정은 '일반'(팀원·식당·계좌·엑셀·백업 등)과 '회의비'(법인카드 기본값)로 나눠 보여 줌
+let settingsView = 'general';
+$('#settingsMode').addEventListener('click', e => {
+  const v = e.target.closest('button')?.dataset.v; if (!v) return;
+  settingsView = v; renderSettingsView(); window.scrollTo(0, 0);
+});
+function renderSettingsView() {
+  setSeg('#settingsMode', settingsView);
+  $$('#tab-settings > .card').forEach(c => (c.hidden = (c.dataset.smode || 'general') !== settingsView));
+}
+
 function renderSettings() {
+  renderSettingsView();
   $('#sMe').value = nameOf('me') === '나' ? '' : nameOf('me');
   $('#sAccount').value = state.account;
   setSeg('#sRound', state.rounding);
