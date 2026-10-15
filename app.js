@@ -218,22 +218,27 @@ const ICONS = {
 const DINNER_C = '#2563b0';
 const PIE_COLORS = ['#c9450e', '#159a6b', '#8f5bd6', '#2563b0', '#b7a38d'];   // 색약 검사 통과 4색 + 기타 회색
 
-const home = { cmp: 'last', panel: 0, week: 7, pie: 'place', slice: null, day: null, month: null };
+const home = { who: 'team', cmp: 'last', panel: 0, week: 7, pie: 'place', slice: null, day: null, month: null };
+// 금액 기준: 팀 전체(실제 결제액) 또는 내 몫(내가 참석한 끼니의 내 부담액)
+const isMe = () => home.who === 'me';
+const amt = m => (isMe() ? m.shares.me || 0 : m.total);
+const homeMeals = () => (isMe() ? state.meals.filter(m => m.participants.includes('me')) : state.meals);
+const perLabel = () => (isMe() ? '한 끼 평균' : '1인 평균');
 
 // 한 주(월~일) 통계. 점심만 평균에 넣음
 function weekStats(mon) {
   const end = addDays(mon, 6);
-  const meals = state.meals.filter(m => m.date >= mon && m.date <= end);
+  const meals = homeMeals().filter(m => m.date >= mon && m.date <= end);
   const lunch = meals.filter(m => m.type !== '회식');
-  const total = lunch.reduce((a, m) => a + m.total, 0);
+  const total = lunch.reduce((a, m) => a + amt(m), 0);
   const days = new Set(lunch.map(m => m.date)).size;
-  const people = lunch.reduce((a, m) => a + m.participants.length, 0);
+  const people = isMe() ? lunch.length : lunch.reduce((a, m) => a + m.participants.length, 0);
   return {
     total, days,
     dailyAvg: days ? total / days : 0, perAvg: people ? total / people : 0,
-    byDay: [0, 1, 2, 3, 4].map(i => lunch.filter(m => m.date === addDays(mon, i)).reduce((a, m) => a + m.total, 0)),
+    byDay: [0, 1, 2, 3, 4].map(i => lunch.filter(m => m.date === addDays(mon, i)).reduce((a, m) => a + amt(m), 0)),
     dinnerDays: [0, 1, 2, 3, 4].map(i => meals.some(m => m.type === '회식' && m.date === addDays(mon, i))),
-    dinnerTotal: meals.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0),
+    dinnerTotal: meals.filter(m => m.type === '회식').reduce((a, m) => a + amt(m), 0),
   };
 }
 // 비교 기준: 지난주, 또는 기록이 있는 최근 4주 평균
@@ -268,8 +273,12 @@ function renderHome() {
       <button data-go="list">${ICONS.list}내역 보기</button>
     </nav>`;
 
-  // 비교 기준 + 점심 하루 평균
+  // 금액 기준 + 비교 기준 + 점심 하루 평균
   html += `
+    <div class="seg home-seg" role="group" aria-label="금액 기준">
+      <button data-who="team" class="${isMe() ? '' : 'on'}">팀 전체</button>
+      <button data-who="me" class="${isMe() ? 'on' : ''}">내 몫</button>
+    </div>
     <div class="seg home-seg" role="group" aria-label="비교 기준">
       <button data-cmp="last" class="${home.cmp === 'last' ? 'on' : ''}">지난주와 비교</button>
       <button data-cmp="avg" class="${home.cmp === 'avg' ? 'on' : ''}">최근 4주 평균과 비교</button>
@@ -278,13 +287,13 @@ function renderHome() {
     const diff = now.dailyAvg - base.dailyAvg;
     html += `
       <div class="card avg-card">
-        <div class="label">점심 하루 평균 (회식 제외) · ${md(mon)}~${md(addDays(mon, 6))}</div>
+        <div class="label">${isMe() ? '내 ' : ''}점심 하루 평균 (회식 제외) · ${md(mon)}~${md(addDays(mon, 6))}</div>
         <div class="avg-main"><span class="avg-num">${won(Math.round(now.dailyAvg))}</span>${chg(now.dailyAvg, base.dailyAvg)}</div>
         <div class="sub">${base.dailyAvg ? `${base.label} ${won(Math.round(base.dailyAvg))}보다 ${won(Math.round(Math.abs(diff)))} ${diff >= 0 ? '더' : '덜'} 썼어요` : `비교할 ${base.label} 점심 기록이 없어요`}</div>
-        <div class="avg-sub"><span>1인 평균 <b>${won(Math.round(now.perAvg))}</b> ${chg(now.perAvg, base.perAvg)}</span><span>점심 <b>${now.days}일</b></span></div>
+        <div class="avg-sub"><span>${perLabel()} <b>${won(Math.round(now.perAvg))}</b> ${chg(now.perAvg, base.perAvg)}</span><span>점심 <b>${now.days}일</b></span></div>
       </div>`;
   } else {
-    html += `<div class="card avg-card"><div class="label">점심 하루 평균 (회식 제외)</div><div class="sub">이번 주 점심 기록이 아직 없어요. <button class="linkbtn" data-go="record">기록하기 →</button></div></div>`;
+    html += `<div class="card avg-card"><div class="label">${isMe() ? '내 ' : ''}점심 하루 평균 (회식 제외)</div><div class="sub">이번 주 점심 기록이 아직 없어요. <button class="linkbtn" data-go="record">기록하기 →</button></div></div>`;
   }
 
   // 그래프 카드
@@ -303,11 +312,11 @@ function renderHome() {
   // 회식 카드 (평균과 따로)
   const last = weekStats(addDays(mon, -7));
   const month = todayStr().slice(0, 7);
-  const mDinner = state.meals.filter(m => m.type === '회식' && m.date.startsWith(month));
+  const mDinner = homeMeals().filter(m => m.type === '회식' && m.date.startsWith(month));
   const dMax = Math.max(now.dinnerTotal, last.dinnerTotal, 1);
   html += `
     <section class="card dinner-card">
-      <div class="label"><span>회식은 따로 봐요</span><span>이번 달 ${mDinner.length}회 · ${won(mDinner.reduce((a, m) => a + m.total, 0))}</span></div>
+      <div class="label"><span>회식은 따로 봐요</span><span>이번 달 ${mDinner.length}회 · ${won(mDinner.reduce((a, m) => a + amt(m), 0))}</span></div>
       <div class="dbar"><span>이번 주</span><i style="width:${now.dinnerTotal / dMax * 100}%"></i><b>${won(now.dinnerTotal)}</b></div>
       <div class="dbar"><span>지난주</span><i class="light" style="width:${last.dinnerTotal / dMax * 100}%"></i><b>${won(last.dinnerTotal)}</b></div>
     </section>`;
@@ -353,9 +362,9 @@ function panelTrend(mon) {
     const pts = vals.map((v, i) => (v == null ? null : `${x(i).toFixed(1)},${y(v).toFixed(1)}`)).filter(Boolean).join(' ');
     const sw = home.week, sv = vals[sw];
     line = `
-      <div class="readout"><b>${md(mons[sw])} 주</b><span>점심 1인 <b>${sv == null ? '기록 없음' : won(Math.round(sv))}</b> · 회식 <b class="dc">${ws[sw].dinnerTotal ? won(ws[sw].dinnerTotal) : '없음'}</b></span></div>
+      <div class="readout"><b>${md(mons[sw])} 주</b><span>점심 ${isMe() ? '한 끼' : '1인'} <b>${sv == null ? '기록 없음' : won(Math.round(sv))}</b> · 회식 <b class="dc">${ws[sw].dinnerTotal ? won(ws[sw].dinnerTotal) : '없음'}</b></span></div>
       <div class="line-wrap">
-        <svg viewBox="0 0 326 150" role="img" aria-label="최근 8주 점심 1인 평균 추이">
+        <svg viewBox="0 0 326 150" role="img" aria-label="최근 8주 점심 ${perLabel()} 추이">
           <line x1="0" y1="20" x2="326" y2="20" class="grid"/><line x1="0" y1="75" x2="326" y2="75" class="grid"/><line x1="0" y1="130" x2="326" y2="130" class="axis"/>
           <text x="0" y="14">${fmt(Math.round(hi))}</text><text x="0" y="126">${fmt(Math.round(lo))}</text>
           <line x1="${x(sw)}" y1="10" x2="${x(sw)}" y2="130" class="guide"/>
@@ -366,11 +375,11 @@ function panelTrend(mon) {
       </div>
       <div class="week-labels">${mons.map(m => `<span>${md(m)}</span>`).join('')}</div>`;
   }
-  return `<h3 class="ptitle">주별 점심 1인 평균 <span class="sub">주를 누르면 상세</span></h3>${line}${donut(mons[0], addDays(mon, 6))}`;
+  return `<h3 class="ptitle">주별 ${isMe() ? '내 ' : ''}점심 ${perLabel()} <span class="sub">주를 누르면 상세</span></h3>${line}${donut(mons[0], addDays(mon, 6))}`;
 }
 
 function donut(from, to) {
-  const meals = state.meals.filter(m => m.date >= from && m.date <= to);
+  const meals = homeMeals().filter(m => m.date >= from && m.date <= to);
   const lunch = meals.filter(m => m.type !== '회식');
   const top = (map, restLabel) => {
     const arr = Object.entries(map).sort((a, b) => b[1] - a[1]);
@@ -381,17 +390,19 @@ function donut(from, to) {
   const byPlace = {}, byPerson = {};
   lunch.forEach(m => {
     const k = m.place || m.type;
-    byPlace[k] = (byPlace[k] || 0) + m.total;
+    byPlace[k] = (byPlace[k] || 0) + amt(m);
     m.participants.forEach(id => (byPerson[id] = (byPerson[id] || 0) + (m.shares[id] || 0)));
   });
   const MODES = {
-    place: { name: '식당별', note: '점심만 (회식 제외) · 상위 4곳 + 기타',
+    place: { name: '식당별', note: `점심만 (회식 제외)${isMe() ? ' · 내 몫' : ''} · 상위 4곳 + 기타`,
       items: top(byPlace, r => `기타 (${r.slice(0, 2).map(x => x[0]).join('·')}${r.length > 2 ? ' 등' : ''})`) },
     person: { name: '사람별', note: '점심만 (회식 제외) · 각자 부담한 금액',
       items: top(byPerson, r => `그 외 ${r.length}명`).map(([k, v]) => [member(k) ? label(k) : k, v]) },
     kind: { name: '점심·회식', note: '회식이 전체 식비에서 차지하는 비중',
-      items: [['점심', lunch.reduce((a, m) => a + m.total, 0)], ['회식', meals.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0)]].filter(x => x[1]) },
+      items: [['점심', lunch.reduce((a, m) => a + amt(m), 0)], ['회식', meals.filter(m => m.type === '회식').reduce((a, m) => a + amt(m), 0)]].filter(x => x[1]) },
   };
+  if (isMe()) delete MODES.person;   // 내 몫에서는 사람별 구성이 의미 없음
+  if (!MODES[home.pie]) home.pie = 'place';
   const mode = MODES[home.pie], items = mode.items, total = items.reduce((a, x) => a + x[1], 0);
   const colors = home.pie === 'kind' ? (items.length === 2 ? ['#c9450e', DINNER_C] : [items[0]?.[0] === '회식' ? DINNER_C : '#c9450e']) : PIE_COLORS;
   const seg = `<div class="seg pie-seg" role="group" aria-label="구성 기준">${Object.entries(MODES).map(([k, v]) => `<button data-pie="${k}" class="${k === home.pie ? 'on' : ''}">${v.name}</button>`).join('')}</div>`;
@@ -429,8 +440,8 @@ function panelCalendar() {
   const month = home.month || todayStr().slice(0, 7);
   const first = month + '-01';
   const lastDay = dateStr(new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0));
-  const inMonth = state.meals.filter(m => m.date.startsWith(month));
-  const lunchOf = d => inMonth.filter(m => m.date === d && m.type !== '회식').reduce((a, m) => a + m.total, 0);
+  const inMonth = homeMeals().filter(m => m.date.startsWith(month));
+  const lunchOf = d => inMonth.filter(m => m.date === d && m.type !== '회식').reduce((a, m) => a + amt(m), 0);
   const max = Math.max(1, ...inMonth.filter(m => m.type !== '회식').map(m => lunchOf(m.date)));
   const weekend = inMonth.filter(m => [0, 6].includes(parseDate(m.date).getDay())).length;
   let rows = '';
@@ -457,7 +468,7 @@ function panelCalendar() {
 }
 
 function dayCard(d, col) {
-  const meals = state.meals.filter(m => m.date === d).sort((a, b) => a.createdAt - b.createdAt);
+  const meals = homeMeals().filter(m => m.date === d).sort((a, b) => a.createdAt - b.createdAt);
   return `<div class="cal-pop" role="region" aria-label="${md(d)} 내역">
     <span class="arrow" style="left: calc(${col * 20 + 10}% - 6px)"></span>
     <div class="cal-pop-head"><b>${fmtDate(d)} 내역 ${meals.length}건</b><button data-act="close-day" aria-label="닫기">✕</button></div>
@@ -465,8 +476,8 @@ function dayCard(d, col) {
       const n = m.participants.length;
       return `<div class="cal-pop-row">
         <span class="badge ${m.type === '회식' ? 'dinner-b' : 'lunch'}">${esc(m.type)}</span>
-        <div><div class="r1"><b>${esc(m.place || m.type)}</b><b>${won(m.total)}</b></div>
-        <span class="sub">${n}명 · 1인 ${won(Math.round(m.total / n))}${m.type === '회식' ? ' · 평균 제외' : ''}${m.voucher ? ` · 상품권 ${m.voucher.rate}%` : ''}</span></div>
+        <div><div class="r1"><b>${esc(m.place || m.type)}</b><b>${won(amt(m))}</b></div>
+        <span class="sub">${n}명 · ${isMe() ? `내 몫 · 전체 ${won(m.total)}` : `1인 ${won(Math.round(m.total / n))}`}${m.type === '회식' ? ' · 평균 제외' : ''}${m.voucher ? ` · 상품권 ${m.voucher.rate}%` : ''}</span></div>
       </div>`;
     }).join('')}
     <button class="linkbtn" data-go="list">내역에서 보기 →</button>
@@ -477,7 +488,8 @@ $('#homeBody').addEventListener('click', e => {
   const t = e.target.closest('button'); if (!t || t.disabled) return;
   const d = t.dataset;
   if (d.go) return showTab(d.go);
-  if (d.cmp) home.cmp = d.cmp;
+  if (d.who) { home.who = d.who; home.slice = null; }
+  else if (d.cmp) home.cmp = d.cmp;
   else if (d.panel) return setPanel(Number(d.panel));   // 다시 그리지 않고 옮겨야 애니메이션이 보임
   else if (d.week) home.week = Number(d.week);
   else if (d.pie) { home.pie = d.pie; home.slice = null; }
@@ -588,6 +600,7 @@ function renderRecord() {
   state.meals.forEach(m => { if (m.place) cnt[m.place] = (cnt[m.place] || 0) + 1; });
   $('#placeList').innerHTML = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]).slice(0, 30)
     .map(p => `<option value="${esc(p)}">`).join('');
+  renderMenuList();
 
   renderPeople();
   renderSplitBoxes();
@@ -616,7 +629,7 @@ function renderIndivRows() {
     ? ids.map(id => `
       <div class="irow menu">
         <span class="iname">${esc(label(id))}</span>
-        <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
+        <input type="text" class="menu-input" data-menu="${id}" list="menuList" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
         <div class="amount-input sm">
           <input type="text" inputmode="numeric" pattern="[0-9]*" data-id="${id}" value="${form.items[id] ? fmt(form.items[id]) : ''}" placeholder="${form.base ? fmt(form.base) : '0'}">
           <span>원</span>
@@ -642,7 +655,7 @@ function renderFixed() {
   $('#eqMenuRows').innerHTML = ids.map(id => `
     <div class="irow menu-only">
       <span class="iname">${esc(label(id))}</span>
-      <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
+      <input type="text" class="menu-input" data-menu="${id}" list="menuList" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
     </div>`).join('');
 }
 function renderFixedHint() {
@@ -665,6 +678,38 @@ function lastMealAt(place) {
     .filter(m => m.place === p && m.split === 'individual' && m.id !== form.editId)
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)[0] || null;
 }
+// 메뉴 자동완성·가격: 그 식당 기록(식당이 비면 전체)에서 메뉴별 가장 최근 가격. 1/N 기록은 가격 없이 이름만
+function menuBook() {
+  const p = form.place.trim(), book = {};
+  [...state.meals].filter(m => m.menus && (!p || m.place === p) && m.id !== form.editId)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt)   // 최근 것부터 → 처음 본 가격을 씀
+    .forEach(m => Object.entries(m.menus).forEach(([id, menu]) => {
+      if (!(menu in book)) book[menu] = 0;
+      if (!book[menu] && m.split === 'individual') book[menu] = m.items[id] || 0;
+    }));
+  return book;
+}
+function renderMenuList() {
+  $('#menuList').innerHTML = Object.keys(menuBook()).slice(0, 30).map(t => `<option value="${esc(t)}">`).join('');
+}
+// 아는 메뉴를 고르면 지난번 가격을 넣음. 비어 있거나 자동으로 넣었던 칸만 (직접 쓴 금액은 그대로)
+function fillPrice(menu, id) {
+  const price = form.split === 'individual' && menuBook()[menu.trim()];
+  if (!price) return;
+  const auto = (form.auto ||= {});
+  if (id === 'base') {
+    if (form.base && !auto.base) return;
+    form.base = price; auto.base = true;
+    $('#fBase').value = fmt(price);
+    $$('#indivRows input[data-id]').forEach(i => (i.placeholder = fmt(price)));
+  } else {
+    if (form.items[id] && !auto[id]) return;
+    form.items[id] = price; auto[id] = true;
+    const input = $(`#indivRows input[data-id="${id}"]`);
+    if (input) input.value = fmt(price);
+  }
+}
+
 function renderFillLast() {
   const last = form.split === 'individual' ? lastMealAt(form.place) : null;
   const btn = $('#fillLast');
@@ -708,7 +753,7 @@ $('#fType').addEventListener('click', e => {
   setSeg('#fType', v); setSeg('#fSplit', form.split);
   renderSplitBoxes();
 });
-$('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); });
+$('#fPlace').addEventListener('input', e => { form.place = e.target.value; renderFillLast(); renderMenuList(); });
 $('#fMemo').addEventListener('input', e => (form.memo = e.target.value));
 $('#fVoucher').addEventListener('change', e => { form.voucher = e.target.checked; renderVoucher(); renderPreview(); });
 
@@ -749,6 +794,7 @@ function bindAmount(input, onValue) {
 bindAmount($('#fTotal'), v => { form.total = v; renderFixedHint(); renderPreview(); });
 bindAmount($('#fBase'), v => {
   form.base = v;
+  if (form.auto) delete form.auto.base;   // 직접 쓴 금액은 메뉴를 바꿔도 덮어쓰지 않음
   $$('#indivRows input[data-id]').forEach(i => (i.placeholder = v ? fmt(v) : '0'));   // 다시 그리지 않아 입력 중 커서 유지
   renderPreview();
 });
@@ -771,6 +817,7 @@ $$('#fBaseMenu, #fBaseMenuEq').forEach(el => el.addEventListener('input', e => {
   form.baseMenu = e.target.value;
   $$('#fBaseMenu, #fBaseMenuEq').forEach(i => { if (i !== e.target) i.value = form.baseMenu; });
   $$('#indivRows [data-menu], #eqMenuRows [data-menu]').forEach(i => (i.placeholder = form.baseMenu || '메뉴'));
+  if (e.target.id === 'fBaseMenu') fillPrice(form.baseMenu, 'base');
   renderPreview();
 }));
 $('#eqMenuRows').addEventListener('input', e => {
@@ -778,11 +825,12 @@ $('#eqMenuRows').addEventListener('input', e => {
 });
 $('#indivRows').addEventListener('input', e => {
   const input = e.target;
-  if (input.dataset.menu) { form.menus[input.dataset.menu] = input.value; renderPreview(); return; }
+  if (input.dataset.menu) { form.menus[input.dataset.menu] = input.value; fillPrice(input.value, input.dataset.menu); renderPreview(); return; }
   if (!input.dataset.id) return;
   const v = toNum(input.value);
   input.value = v ? fmt(v) : '';
   form.items[input.dataset.id] = v;
+  if (form.auto) delete form.auto[input.dataset.id];
   renderPreview();
 });
 
@@ -945,6 +993,8 @@ $('#listBody').addEventListener('click', e => {
 
 /* ===================== ③ 정산 탭 ===================== */
 const openPersons = new Set();   // 상세내역 펼친 사람
+const LATE_DAYS = 14;            // 이 날수가 넘은 미입금은 빨갛게 표시
+const daysAgo = s => Math.round((parseDate(todayStr()) - parseDate(s)) / 86400000);
 
 function personIds(per) {
   const known = state.members.map(m => m.id).filter(id => per[id]);
@@ -1143,17 +1193,22 @@ function renderSettle() {
     ids.forEach(id => {
       const p = per[id];
       const open = openPersons.has(id);
+      const oldest = daysAgo(p.items[0].m.date);   // items는 날짜순
       html += `
         <div class="person" data-id="${id}">
           <div class="person-line">
             <button class="person-main" data-act="toggle">
-              <span><b>${esc(nameOf(id))}</b> <span class="sub">${p.items.length}건 ${open ? '▴' : '▾'}</span></span>
+              <span><b>${esc(nameOf(id))}</b> <span class="sub">${p.items.length}건 ${open ? '▴' : '▾'}</span>${oldest > LATE_DAYS ? ` <span class="badge late">${oldest}일 지남</span>` : ''}</span>
               <span class="person-amt">${won(p.amt)}</span>
             </button>
             <button class="btn small ok" data-act="paid">입금 확인</button>
           </div>
           <div class="person-detail" ${open ? '' : 'hidden'}>
-            ${p.items.map(x => `<div class="drow"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
+            ${p.items.map(x => `<div class="drow ${daysAgo(x.m.date) > LATE_DAYS ? 'late' : ''}"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
+            <div class="pd-actions">
+              <button class="linkbtn" data-act="msg">${esc(nameOf(id))}에게 보낼 메시지 복사</button>
+              ${canShare ? '<button class="linkbtn" data-act="msg-share">공유</button>' : ''}
+            </div>
           </div>
         </div>`;
     });
@@ -1272,6 +1327,12 @@ $('#settleBody').addEventListener('click', async e => {
   const id = e.target.closest('.person').dataset.id;
   if (act === 'toggle') { openPersons.has(id) ? openPersons.delete(id) : openPersons.add(id); renderSettle(); }
   if (act === 'paid') markPaid(id);
+  if (act === 'msg' || act === 'msg-share') {
+    const text = buildMessage(outstanding(), [id]);   // 그 사람 몫만 담은 개인 메시지
+    if (act === 'msg-share') { try { await navigator.share({ text }); } catch (_) {} return; }
+    const ok = await copyText(text);
+    toast(ok ? `${nameOf(id)} 메시지를 복사했어요` : '복사에 실패했어요');
+  }
 });
 $('#settleBody').addEventListener('change', e => {
   if (e.target.id === 'detailChk') { state.includeDetail = e.target.checked; saveState(); renderSettle(); }

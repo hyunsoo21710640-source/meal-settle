@@ -87,7 +87,7 @@
         <div class="label mt"><span>메뉴 <span class="sub">(선택, 비우면 식당 이름)</span></span></div>
         <div class="irow menu-only base-row">
           <span class="iname">기본</span>
-          <input type="text" class="menu-input" id="fBaseMenuEq" placeholder="메뉴" autocomplete="off">
+          <input type="text" class="menu-input" id="fBaseMenuEq" list="menuList" placeholder="메뉴" autocomplete="off">
         </div>
         <div id="eqMenuRows"></div>
       </div>
@@ -99,7 +99,8 @@
         </div>
         <div class="irow menu base-row">
           <span class="iname">기본</span>
-          <input type="text" class="menu-input" id="fBaseMenu" placeholder="메뉴" autocomplete="off">
+          <input type="text" class="menu-input" id="fBaseMenu" list="menuList" placeholder="메뉴" autocomplete="off">
+          <datalist id="menuList"></datalist>
           <div class="amount-input sm">
             <input type="text" inputmode="numeric" pattern="[0-9]*" id="fBase" placeholder="0">
             <span>원</span>
