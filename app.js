@@ -1490,10 +1490,14 @@ async function drawTable(per, ids) {
   const tableW = nameW + dayW * dates.length + sumW;
   const range = dates.length > 1 ? `${fmtDate(dates[0])}~${fmtDate(dates[dates.length - 1])}` : fmtDate(dates[0]);
   const hasVoucher = ids.some(id => dates.some(d => cell[id][d]?.voucher));
-  const foot = [hasVoucher && '초록 칸: 지역상품권 할인 적용', allSaved && '합계: 위 작은 숫자 = 원래 금액, 아래 초록 숫자 = 할인된 금액',
+  const foot = [hasVoucher && '초록 칸: 지역상품권 할인 적용', allSaved && '합계: 줄 그은 숫자 = 원래 금액, 아래 초록 숫자 = 할인된 금액',
     state.account && `입금 계좌: ${state.account}`].filter(Boolean);
   const titleH = 56;
-  const width = Math.ceil(Math.max(tableW, W(F(700, 20), `식대 정산 ${range}`)) + pad * 2);
+  const netTotal = ids.reduce((a, id) => a + per[id].amt, 0);
+  // 할인율 = 할인액 ÷ 원래 합계
+  const subTitle = `미입금 ${ids.length}명 · 합계 ${won(netTotal)}`
+    + (allSaved ? ` · 상품권 할인 ${won(allSaved)} (${(allSaved / (netTotal + allSaved) * 100).toFixed(1)}%)` : '');
+  const width = Math.ceil(Math.max(tableW, W(F(700, 20), `식대 정산 ${range}`), W(F(500, 13), subTitle)) + pad * 2);
   const height = Math.ceil(pad + titleH + headH + ids.reduce((a, id) => a + personH(id), 0) + sumH + (foot.length ? gap + foot.length * 22 : 0) + pad);
 
   const scale = 2, cv = ctx.canvas;
@@ -1511,7 +1515,7 @@ async function drawTable(per, ids) {
   };
 
   text(`식대 정산 ${range}`, pad, pad + 14, F(700, 20), C.text);
-  text(`미입금 ${ids.length}명 · 합계 ${won(ids.reduce((a, id) => a + per[id].amt, 0))}`, pad, pad + 40, F(500, 13), C.sub);
+  text(subTitle, pad, pad + 40, F(500, 13), C.sub);
 
   let y = pad + titleH;
   const colX = i => pad + nameW + dayW * i;
@@ -1544,7 +1548,11 @@ async function drawTable(per, ids) {
     });
     const sx = colX(dates.length) + sumW - 12;
     if (r.saved) {
-      text(fmt(r.total + r.saved), sx, y + h / 2 - 10, F(500, 12), C.sub, 'right');   // 원래 금액
+      const was = fmt(r.total + r.saved), wy = y + h / 2 - 10;
+      text(was, sx, wy, F(500, 12), C.sub, 'right');   // 원래 금액 + 가로줄
+      ctx.font = F(500, 12);
+      ctx.strokeStyle = C.sub; ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(sx - ctx.measureText(was).width - 1, wy + .5); ctx.lineTo(sx + 1, wy + .5); ctx.stroke();
       text(fmt(r.total), sx, y + h / 2 + 9, F(700, 17), C.save, 'right');            // 할인된 금액
     } else text(fmt(r.total), sx, y + h / 2, F(700, 15), C.accent, 'right');
     y += h;
