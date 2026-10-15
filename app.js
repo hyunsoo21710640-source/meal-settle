@@ -7,7 +7,7 @@
                         items, common, total, shares, paid, memo, createdAt, voucher? }]
         · shares : { 팀원id: 부담금액 }  ← 상품권 할인이 있으면 할인 후 금액
         · base   : 개별 금액의 기본 금액(빈 칸에 들어간 값) / fixed: 1/N에서 따로 정한 { 팀원id: 금액 }
-        · menus  : { 팀원id: 메뉴 } (개별 금액만, 빈 메뉴는 저장 안 함) / baseMenu: 기본 메뉴
+        · menus  : { 팀원id: 메뉴 } (개별 금액·1/N 모두, 빈 메뉴는 저장 안 함) / baseMenu: 기본 메뉴
         · voucher: { rate, gross, grossShares }  ← 지역상품권 할인 기록(할인율, 할인 전 총액·부담액)
         · paid   : { 팀원id: 입금확인 시각(timestamp) }  ← 없으면 미입금
    ===================================================================== */
@@ -577,6 +577,7 @@ function renderRecord() {
   $('#fCommon').value = form.common ? fmt(form.common) : '';
   $('#fBase').value = form.base ? fmt(form.base) : '';
   $('#fBaseMenu').value = form.baseMenu;
+  $('#fBaseMenuEq').value = form.baseMenu;
   $('#fMemo').value = form.memo;
   renderVoucher();
   $('#editBanner').hidden = !form.editId;
@@ -638,6 +639,11 @@ function renderFixed() {
       </div>
     </div>`).join('');
   renderFixedHint();
+  $('#eqMenuRows').innerHTML = ids.map(id => `
+    <div class="irow menu-only">
+      <span class="iname">${esc(label(id))}</span>
+      <input type="text" class="menu-input" data-menu="${id}" value="${esc(form.menus[id] || '')}" placeholder="${esc(form.baseMenu || '메뉴')}" autocomplete="off">
+    </div>`).join('');
 }
 function renderFixedHint() {
   const fx = fixedIds(form), rest = ordered(form.participants).length - fx.length;
@@ -689,7 +695,7 @@ function renderPreview() {
     </div>
     ${voucher ? `<div class="pv-disc"><span>상품권 ${voucher.rate}% 할인</span><span>−${won(voucher.gross - total)}</span></div>
       <div class="pv-disc plain"><span>실제 결제</span><span>${won(total)}</span></div>` : ''}
-    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}${form.split === 'equal' && id in form.fixed ? ' <span class="sub">따로</span>' : ''}${form.split === 'individual' && menuIn(form, id) ? ` <span class="sub">${esc(menuIn(form, id))}</span>` : ''}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
+    ${ids.map(id => `<div class="pv-row ${id === 'me' ? 'me' : ''}"><span>${esc(label(id))}${form.split === 'equal' && id in form.fixed ? ' <span class="sub">따로</span>' : ''}${menuIn(form, id) ?` <span class="sub">${esc(menuIn(form, id))}</span>` : ''}</span><span>${voucher ? `<s>${fmt(voucher.grossShares[id])}</s>` : ''}${won(shares[id])}</span></div>`).join('')}
   `;
 }
 
@@ -760,10 +766,15 @@ $('#fixedRows').addEventListener('input', e => {
   renderFixedHint(); renderPreview();
 });
 bindAmount($('#fCommon'), v => { form.common = v; renderPreview(); });
-$('#fBaseMenu').addEventListener('input', e => {
+// 기본 메뉴 칸은 개별 금액·1/N에 하나씩 있고 같은 값을 씀
+$$('#fBaseMenu, #fBaseMenuEq').forEach(el => el.addEventListener('input', e => {
   form.baseMenu = e.target.value;
-  $$('#indivRows [data-menu]').forEach(i => (i.placeholder = form.baseMenu || '메뉴'));
+  $$('#fBaseMenu, #fBaseMenuEq').forEach(i => { if (i !== e.target) i.value = form.baseMenu; });
+  $$('#indivRows [data-menu], #eqMenuRows [data-menu]').forEach(i => (i.placeholder = form.baseMenu || '메뉴'));
   renderPreview();
+}));
+$('#eqMenuRows').addEventListener('input', e => {
+  if (e.target.dataset.menu) { form.menus[e.target.dataset.menu] = e.target.value; renderPreview(); }
 });
 $('#indivRows').addEventListener('input', e => {
   const input = e.target;
@@ -824,11 +835,9 @@ function saveMeal() {
     createdAt: Date.now(),
   };
   if (form.split === 'individual' && form.base) meal.base = form.base;
-  if (form.split === 'individual') {
-    const menus = Object.fromEntries(ids.map(id => [id, menuIn(form, id)]).filter(([, v]) => v));
-    if (Object.keys(menus).length) meal.menus = menus;
-    if (form.baseMenu.trim()) meal.baseMenu = form.baseMenu.trim();
-  }
+  const menus = Object.fromEntries(ids.map(id => [id, menuIn(form, id)]).filter(([, v]) => v));
+  if (Object.keys(menus).length) meal.menus = menus;
+  if (form.baseMenu.trim()) meal.baseMenu = form.baseMenu.trim();
   if (form.split === 'equal' && fixedIds(form).length) meal.fixed = Object.fromEntries(fixedIds(form).map(id => [id, form.fixed[id] || 0]));
   if (voucher) meal.voucher = voucher;
 
@@ -953,14 +962,22 @@ function buildMessage(per, ids) {
   ids.forEach(id => {
     const p = per[id];
     const hasOld = p.items.some(x => x.m.date < thisWeek);
-    lines.push(`${nameOf(id)} ${won(p.amt)}${hasOld ? ' (지난 미입금 포함)' : ''}`);
+    const saved = p.items.reduce((a, x) => a + voucherSaved(x.m, id), 0);
+    const notes = [hasOld && '지난 미입금 포함', saved && `상품권 ${won(saved)} 할인`].filter(Boolean);
+    lines.push(`${nameOf(id)} ${won(p.amt)}${notes.length ? ` (${notes.join(', ')})` : ''}`);
     if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${won(x.amt)}`));
   });
   const vMeals = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m)))].filter(m => m.voucher)
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
   if (vMeals.length) {
     lines.push('');
-    vMeals.forEach(m => lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% 할인 적용`));
+    vMeals.forEach(m => {
+      // 팀원 할인액이 모두 같으면 '1인', 다르면(개별 금액 등) '1인 평균'
+      const others = m.participants.filter(id => id !== 'me').map(id => voucherSaved(m, id));
+      const same = others.length && others.every(v => v === others[0]);
+      const per = same ? `1인 ${won(others[0])}` : `1인 평균 ${won((m.voucher.gross - m.total) / m.participants.length)}`;
+      lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% 할인 · 총 ${won(m.voucher.gross - m.total)} (${per})`);
+    });
   }
   if (state.account) lines.push('', `입금 계좌: ${state.account}`);
   return lines.join('\n');
@@ -1102,6 +1119,22 @@ function renderSettle() {
       <div class="big">${won(total)}</div>
       <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명` : '모두 정산됐어요'}</div>
       ${saved ? `<div class="save-line">지역상품권으로 팀원 몫 ${won(saved)} 할인됐어요</div>` : ''}
+    </div>`;
+
+  // 이번 주(월~일) 식비: 전체 결제액과 그중 내 몫 (상품권 할인 반영된 실제 금액)
+  const mon = mondayOf(todayStr()), sun = addDays(mon, 6);
+  const week = state.meals.filter(m => m.date >= mon && m.date <= sun);
+  const wTotal = week.reduce((a, m) => a + m.total, 0);
+  const wMine = week.reduce((a, m) => a + (m.shares.me || 0), 0);
+  const wDinner = week.filter(m => m.type === '회식').reduce((a, m) => a + m.total, 0);
+  html += `
+    <div class="card">
+      <div class="label"><span>이번 주 식비</span><span class="sub">${md(mon)}~${md(sun)} · ${week.length}건</span></div>
+      <div class="week-sum">
+        <div><span class="sub">전체</span><b>${won(wTotal)}</b></div>
+        <div><span class="sub">내가 쓴 금액</span><b>${won(wMine)}</b></div>
+      </div>
+      ${wDinner ? `<p class="hint">전체 중 점심 ${won(wTotal - wDinner)} · 회식 ${won(wDinner)}</p>` : ''}
     </div>`;
 
   // 사람별

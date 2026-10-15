@@ -99,6 +99,8 @@ input::placeholder { color: var(--sub); opacity: .7; }
 .irow { display: grid; grid-template-columns: 1fr 150px; align-items: center; gap: 10px; margin-bottom: 8px; }
 .irow.menu { grid-template-columns: 76px minmax(0, 1fr) 118px; gap: 8px; }
 .irow.menu .menu-input { min-height: 44px; padding: 9px 12px; font-size: 15px; }
+.irow.menu-only { grid-template-columns: 76px minmax(0, 1fr); gap: 8px; }
+.irow.menu-only .menu-input { min-height: 44px; padding: 9px 12px; font-size: 15px; }
 .base-row .iname { color: var(--accent); font-weight: 700; }
 .base-hint { margin: -2px 0 12px; }
 .hint.danger { color: var(--danger); }
@@ -163,6 +165,9 @@ s { color: var(--sub); font-weight: 400; font-size: .82em; margin-right: 4px; }
 .hero .sub { color: inherit; font-weight: 500; }
 .big { font-family: var(--display); font-size: 36px; font-weight: 400; line-height: 1.2; margin: 2px 0 4px; }
 .save-line { margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,.3); font-size: 13px; font-weight: 500; }
+.week-sum { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.week-sum div { display: flex; flex-direction: column; gap: 2px; }
+.week-sum b { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .person { border-top: 1px solid var(--line); padding: 12px 0; }
 .person:first-of-type { border-top: 0; padding-top: 0; }
 .person-line { display: flex; align-items: center; gap: 10px; }
