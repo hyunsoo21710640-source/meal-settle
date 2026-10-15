@@ -484,3 +484,15 @@ textarea:focus { border-color: var(--accent); }
 .settings-seg button[data-v="corp"].on { color: var(--corp-ink); }
 #mDateIn { margin-bottom: 0; }
 .sticky-action .btn:disabled { background: var(--seg); border-color: var(--seg); color: var(--sub); opacity: 1; }
+/* 할인 전 가격: 빨간 사선 */
+s.was { position: relative; text-decoration: none; color: var(--sub); font-weight: 400; white-space: nowrap; }
+s.was::after { content: ''; position: absolute; left: -2px; right: -2px; top: 50%; border-top: 1.6px solid #d93025; transform: rotate(-14deg); }
+/* 주차별 미입금 카드 */
+.wk-list { display: flex; flex-direction: column; gap: 8px; }
+.wk { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1.5px solid var(--border); background: var(--card); border-radius: 14px; text-align: left; font: inherit; color: var(--text); }
+.wk .grow { flex: 1; min-width: 0; }
+.wk .ck { flex: none; width: 24px; height: 24px; border-radius: 7px; border: 1.5px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; color: #fff; }
+.wk-amt { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wk.on { border-color: var(--accent); background: var(--accent-weak); }
+.wk.on .ck { background: var(--accent); border-color: var(--accent); }
+.wk:not(.on) .wk-amt, .wk:not(.on) b { color: var(--sub); }

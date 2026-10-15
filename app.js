@@ -1651,10 +1651,45 @@ async function corpAction(act, id) {
   }
 }
 
+/* --- 주차별 미입금: 켠 주만 이번 정산(사람별·메시지·표·입금 확인)에 들어감. 처음엔 가장 최근 주만 켜짐 --- */
+let settleWeeks = null;   // 켠 주의 월요일들 (Set)
+function unpaidWeeks(all) {
+  const map = {};
+  Object.entries(all).forEach(([id, p]) => p.items.forEach(x => {
+    const mon = mondayOf(x.m.date);
+    const w = (map[mon] ||= { mon, amt: 0, ids: new Set(), meals: new Set() });
+    w.amt += x.amt; w.ids.add(id); w.meals.add(x.m.id);
+  }));
+  return Object.values(map).sort((a, b) => b.mon.localeCompare(a.mon));
+}
+function pickedPer(all, weeks) {
+  const out = {};
+  Object.entries(all).forEach(([id, p]) => {
+    const items = p.items.filter(x => weeks.has(mondayOf(x.m.date)));
+    if (items.length) out[id] = { amt: items.reduce((a, x) => a + x.amt, 0), items };
+  });
+  return out;
+}
+const weekName = mon => {
+  const k = Math.round((parseDate(mondayOf(todayStr())) - parseDate(mon)) / (7 * 864e5));
+  return k === 0 ? '이번 주' : k === 1 ? '지난주' : k > 1 ? `${k}주 전` : '';
+};
+// 이번 정산 대상: 켠 주가 다 입금되어 없어지면 다시 가장 최근 주를 켬
+function settlePer() {
+  const all = outstanding(), weeks = unpaidWeeks(all), have = new Set(weeks.map(w => w.mon));
+  if (settleWeeks) settleWeeks = new Set([...settleWeeks].filter(w => have.has(w)));
+  if (!settleWeeks || !settleWeeks.size) settleWeeks = new Set(weeks.length ? [weeks[0].mon] : []);
+  return { all, weeks, per: pickedPer(all, settleWeeks) };
+}
+// 메시지 미리보기: 할인 전 금액('22,000원 → ')에 빨간 사선. 복사되는 글은 그대로
+const msgHtml = msg => esc(msg).replace(/([\d,]+원) → /g, '<s class="was">$1</s> ');
+let lastMsg = '';
+
 function renderSettle() {
-  const per = outstanding();
+  const { all, weeks, per } = settlePer();
   const ids = personIds(per);
   const total = ids.reduce((a, id) => a + per[id].amt, 0);
+  const allTotal = Object.values(all).reduce((a, p) => a + p.amt, 0);
   const mealCount = new Set(ids.flatMap(id => per[id].items.map(x => x.m.id))).size;
   const msg = buildMessage(per, ids);
   const batches = paidBatches();
@@ -1667,7 +1702,7 @@ function renderSettle() {
   if (corpMeals.length) {
     const todo = corpMeals.filter(m => !m.corp.resolved).length + corpReturns().filter(r => !r.done).length;
     html += `<div class="seg settle-seg" role="group" aria-label="정산 종류">
-      <button data-sv="team" class="${settleView === 'team' ? 'on' : ''}">팀원 정산 · ${won(total)}</button>
+      <button data-sv="team" class="${settleView === 'team' ? 'on' : ''}">팀원 정산 · ${won(allTotal)}</button>
       <button data-sv="corp" class="${settleView === 'corp' ? 'on' : ''}">회의비${todo ? ` · 할 일 ${todo}` : ''}</button></div>`;
     if (settleView === 'corp') { $('#settleBody').innerHTML = html + corpSettleHtml(); return; }
   }
@@ -1675,11 +1710,25 @@ function renderSettle() {
   // 요약
   html += `
     <div class="card ${total ? 'hero' : ''}">
-      <div class="sub">아직 받을 돈</div>
+      <div class="sub">${weeks.length > 1 ? '이번에 받을 돈 (켠 주)' : '아직 받을 돈'}</div>
       <div class="big">${won(total)}</div>
-      <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명` : '모두 정산됐어요'}</div>
+      <div class="sub">${total ? `미입금 기록 ${mealCount}건 · ${ids.length}명${allTotal !== total ? ` · 전체 미입금 ${won(allTotal)}` : ''}` : '모두 정산됐어요'}</div>
       ${saved ? `<div class="save-line">지역상품권으로 팀원 몫 ${won(saved)} 할인됐어요</div>` : ''}
     </div>`;
+
+  // 주차별 미입금 카드: 누르면 이번 정산에 넣기·빼기
+  if (weeks.length) {
+    html += `<div class="card"><div class="label"><span class="strong">주차별 미입금</span><span class="sub">눌러서 이번 정산에 넣기·빼기</span></div><div class="wk-list">`
+      + weeks.map(w => {
+        const on = settleWeeks.has(w.mon);
+        return `<button class="wk ${on ? 'on' : ''}" data-wk="${w.mon}" aria-pressed="${on}">
+          <span class="ck" aria-hidden="true">${on ? '✓' : ''}</span>
+          <span class="grow"><b>${md(w.mon)}~${md(addDays(w.mon, 6))}</b> <span class="sub">${weekName(w.mon)}</span>
+            <span class="sub" style="display:block">${w.ids.size}명 · ${w.meals.size}건</span></span>
+          <b class="wk-amt">${won(w.amt)}</b>
+        </button>`;
+      }).join('') + '</div></div>';
+  }
 
   // 이번 주(월~일) 식비: 전체 결제액과 그중 내 몫 (상품권 할인 반영된 실제 금액)
   const mon = mondayOf(todayStr()), sun = addDays(mon, 6);
@@ -1716,7 +1765,7 @@ function renderSettle() {
             <button class="btn small ok" data-act="paid">입금 확인</button>
           </div>
           <div class="person-detail" ${open ? '' : 'hidden'}>
-            ${p.items.map(x => `<div class="drow ${daysAgo(x.m.date) > LATE_DAYS ? 'late' : ''}"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${won(x.amt)}</span></div>`).join('')}
+            ${p.items.map(x => `<div class="drow ${daysAgo(x.m.date) > LATE_DAYS ? 'late' : ''}"><span>${fmtDate(x.m.date)} ${esc(menuOf(x.m, id))}${x.m.voucher ? `<i class="vtag">−${x.m.voucher.rate}%</i>` : ''}</span><span>${voucherSaved(x.m, id) ? `<s class="was">${won(x.amt + voucherSaved(x.m, id))}</s> ` : ''}${won(x.amt)}</span></div>`).join('')}
             <div class="pd-actions">
               <button class="linkbtn" data-act="msg">${esc(nameOf(id))}에게 보낼 메시지 복사</button>
               ${canShare ? '<button class="linkbtn" data-act="msg-share">공유</button>' : ''}
@@ -1731,7 +1780,7 @@ function renderSettle() {
       <div class="card">
         <div class="label">정산 메시지</div>
         <label class="check"><input type="checkbox" id="detailChk" ${state.includeDetail ? 'checked' : ''}> 날짜별 상세 내역 포함</label>
-        <pre class="msg" id="msgBox">${esc(msg)}</pre>
+        <pre class="msg" id="msgBox">${msgHtml(msg)}</pre>
         <div class="btnrow">
           <button class="btn primary" id="copyBtn">메시지 복사</button>
           ${canShare ? '<button class="btn" id="shareBtn">카톡 등으로 공유</button>' : ''}
@@ -1765,6 +1814,7 @@ function renderSettle() {
   }
 
   $('#settleBody').innerHTML = html;
+  lastMsg = msg;
   if (ids.length) {
     const ver = ++tableVer;
     tableCanvas = null;
@@ -1788,6 +1838,8 @@ function markPaid(id) {
   const ts = Date.now();
   let amt = 0;
   state.meals.forEach(m => {
+    // 켠 주의 기록만 입금 처리 (꺼 둔 지난주 미입금은 그대로 남김)
+    if (settleWeeks && !settleWeeks.has(mondayOf(m.date))) return;
     if (m.participants.includes(id) && (m.shares[id] || 0) > 0 && !isPaid(m, id)) {
       (m.paid ||= {})[id] = ts;
       amt += m.shares[id];
@@ -1818,17 +1870,25 @@ async function copyText(text) {
 $('#settleBody').addEventListener('click', async e => {
   const sv = e.target.closest('[data-sv]')?.dataset.sv;
   if (sv) { settleView = sv; return renderSettle(); }
+  const wk = e.target.closest('[data-wk]')?.dataset.wk;
+  if (wk) {
+    if (settleWeeks.has(wk)) {
+      if (settleWeeks.size === 1) return toast('한 주는 켜 둬야 해요');
+      settleWeeks.delete(wk);
+    } else settleWeeks.add(wk);
+    return renderSettle();
+  }
   const c = e.target.closest('[data-c]');
   if (c) return corpAction(c.dataset.c, c.closest('[data-id]')?.dataset.id);
   const undo = e.target.closest('[data-undo]')?.dataset.undo;
   if (undo) { const [id, ts] = undo.split('|'); return undoPaid(id, Number(ts)); }
 
   if (e.target.closest('#copyBtn')) {
-    const ok = await copyText($('#msgBox').textContent);
+    const ok = await copyText(lastMsg);
     return toast(ok ? '복사했어요. 카톡 단톡방에 붙여넣기 하세요' : '복사에 실패했어요. 메시지를 길게 눌러 복사해 주세요');
   }
   if (e.target.closest('#shareBtn')) {
-    try { await navigator.share({ text: $('#msgBox').textContent }); } catch (_) {}
+    try { await navigator.share({ text: lastMsg }); } catch (_) {}
     return;
   }
   if (e.target.closest('#shareImgBtn, #saveImgBtn')) {
@@ -1844,7 +1904,7 @@ $('#settleBody').addEventListener('click', async e => {
   if (act === 'toggle') { openPersons.has(id) ? openPersons.delete(id) : openPersons.add(id); renderSettle(); }
   if (act === 'paid') markPaid(id);
   if (act === 'msg' || act === 'msg-share') {
-    const text = buildMessage(outstanding(), [id]);   // 그 사람 몫만 담은 개인 메시지
+    const text = buildMessage(settlePer().per, [id]);   // 그 사람 몫만 담은 개인 메시지 (켠 주만)
     if (act === 'msg-share') { try { await navigator.share({ text }); } catch (_) {} return; }
     const ok = await copyText(text);
     toast(ok ? `${nameOf(id)} 메시지를 복사했어요` : '복사에 실패했어요');
