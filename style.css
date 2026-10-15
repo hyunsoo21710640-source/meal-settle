@@ -483,3 +483,4 @@ textarea:focus { border-color: var(--accent); }
 .settings-seg { margin-bottom: 12px; }
 .settings-seg button[data-v="corp"].on { color: var(--corp-ink); }
 #mDateIn { margin-bottom: 0; }
+.sticky-action .btn:disabled { background: var(--seg); border-color: var(--seg); color: var(--sub); opacity: 1; }

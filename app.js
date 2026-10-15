@@ -202,12 +202,18 @@ const TAB_TITLES = { home: '이번 주 식대', record: '오늘 뭐 먹었어요
 let currentTab = 'record';
 
 function showTab(tab) {
+  // 설정을 바꾸고 저장하지 않은 채 다른 탭으로 가면 저장할지 물음
+  if (currentTab === 'settings' && tab !== 'settings' && settingsDirty) {
+    if (confirm('저장하지 않은 설정이 있어요. 저장할까요?\n(취소를 누르면 바꾼 내용이 사라져요)')) { if (!saveSettings()) return; }
+    else settingsDirty = false;
+  }
   currentTab = tab;
   $('#toast').hidden = true;
   $$('.tab').forEach(s => (s.hidden = s.id !== 'tab-' + tab));
   $$('.navbtn').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
   $('#pageTitle').textContent = TAB_TITLES[tab];
   $('#saveBar').hidden = tab !== 'record';
+  $('#settingsBar').hidden = tab !== 'settings';
   ({ home: renderHome, record: renderRecord, list: renderList, settle: renderSettle, settings: renderSettings })[tab]();
   renderTop();
   window.scrollTo(0, 0);
@@ -1421,8 +1427,13 @@ function buildMessage(per, ids) {
     const hasOld = p.items.some(x => x.m.date < thisWeek);
     const saved = p.items.reduce((a, x) => a + voucherSaved(x.m, id), 0);
     const notes = [hasOld && '지난 미입금 포함', saved && `상품권 ${won(saved)} 할인`].filter(Boolean);
-    lines.push(`${nameOf(id)} ${won(p.amt)}${notes.length ? ` (${notes.join(', ')})` : ''}`);
-    if (state.includeDetail) p.items.forEach(x => lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${won(x.amt)}`));
+    // 상품권 할인이 있으면 할인 전 → 할인 후 금액을 같이 보여 줌
+    const amt = saved ? `${won(p.amt + saved)} → ${won(p.amt)}` : won(p.amt);
+    lines.push(`${nameOf(id)} ${amt}${notes.length ? ` (${notes.join(', ')})` : ''}`);
+    if (state.includeDetail) p.items.forEach(x => {
+      const s = voucherSaved(x.m, id);
+      lines.push(`  · ${fmtDate(x.m.date)} ${menuOf(x.m, id)} ${s ? `${won(x.amt + s)} → ` : ''}${won(x.amt)}`);
+    });
   });
   const vMeals = [...new Set(ids.flatMap(id => per[id].items.map(x => x.m)))].filter(m => m.voucher)
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
@@ -1433,7 +1444,7 @@ function buildMessage(per, ids) {
       const others = m.participants.filter(id => id !== 'me').map(id => voucherSaved(m, id));
       const same = others.length && others.every(v => v === others[0]);
       const per = same ? `1인 ${won(others[0])}` : `1인 평균 ${won((m.voucher.gross - m.total) / m.participants.length)}`;
-      lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% 할인 · 총 ${won(m.voucher.gross - m.total)} (${per})`);
+      lines.push(`※ ${fmtDate(m.date)} ${m.place || m.type}: 지역상품권 ${m.voucher.rate}% · ${won(m.voucher.gross)} → ${won(m.total)} (총 ${won(m.voucher.gross - m.total)}, ${per} 할인)`);
     });
   }
   if (state.account) lines.push('', `입금 계좌: ${state.account}`);
@@ -1865,14 +1876,11 @@ function renderSettingsView() {
 
 function renderSettings() {
   renderSettingsView();
-  $('#sMe').value = nameOf('me') === '나' ? '' : nameOf('me');
-  $('#sAccount').value = state.account;
-  setSeg('#sRound', state.rounding);
-  $('#sVoucher').value = state.voucherRate;
+  if (!settingsDirty) fillSettingFields();   // 저장 전 입력 중인 값은 다시 그려도 지우지 않음
+  renderSettingsBar();
   if (!$('#xFrom').value) $('#xFrom').value = todayStr().slice(0, 8) + '01';   // 기본: 이번 달 1일 ~ 오늘
   if (!$('#xTo').value) $('#xTo').value = todayStr();
   renderXlsxHint();
-  $('#sAskMenu').checked = state.askMenuSave;
   renderMenuBook();
   renderCorpSettings();
   const used = usedIds();
@@ -1886,21 +1894,55 @@ function renderSettings() {
     </div>`).join('') : `<p class="hint" style="margin:0 0 10px">함께 식사하는 팀원을 추가해 주세요.</p>`;
 }
 
-$('#sMe').addEventListener('change', e => {
-  member('me').name = e.target.value.trim() || '나'; saveState();
-});
-$('#sAccount').addEventListener('change', e => { state.account = e.target.value.trim(); saveState(); });
+/* --- 설정 입력 칸은 [설정 저장]을 눌러야 저장 (추가·삭제 버튼은 누르는 즉시 저장) --- */
+let settingsDirty = false, draftRound = 'none';
+const DRAFT_IDS = ['sMe', 'sAccount', 'sVoucher', 'sAskMenu', 'sCorpBudget', 'sCorpLimit', 'sCorpTrip', 'sMinStart', 'sMinEnd', 'sMinPlace', 'sMinNote'];
+function fillSettingFields() {
+  const c = state.corp;
+  $('#sMe').value = nameOf('me') === '나' ? '' : nameOf('me');
+  $('#sAccount').value = state.account;
+  draftRound = state.rounding; setSeg('#sRound', draftRound);
+  $('#sVoucher').value = state.voucherRate;
+  $('#sAskMenu').checked = state.askMenuSave;
+  $('#sCorpBudget').value = c.budget ? fmt(c.budget) : '';
+  $('#sCorpLimit').value = c.limit ? fmt(c.limit) : '';
+  $('#sCorpTrip').value = c.tripFee ? fmt(c.tripFee) : '';
+  $('#sMinStart').value = c.start; $('#sMinEnd').value = c.end;
+  $('#sMinPlace').value = c.place; $('#sMinNote').value = c.note;
+}
+function renderSettingsBar() {
+  const b = $('#settingsSave');
+  b.disabled = !settingsDirty;
+  b.textContent = settingsDirty ? '설정 저장' : '저장됨 ✓';
+}
+const markSettingsDirty = () => { settingsDirty = true; renderSettingsBar(); };
+function saveSettings() {
+  const v = toNum($('#sVoucher').value);
+  if (v < 1 || v > 50) { toast('할인율은 1~50% 사이로 넣어 주세요'); return false; }
+  member('me').name = $('#sMe').value.trim() || '나';
+  state.account = $('#sAccount').value.trim();
+  state.rounding = draftRound;
+  state.voucherRate = v;
+  state.askMenuSave = $('#sAskMenu').checked;
+  Object.assign(state.corp, {
+    budget: toNum($('#sCorpBudget').value), limit: toNum($('#sCorpLimit').value), tripFee: toNum($('#sCorpTrip').value),
+    start: $('#sMinStart').value, end: $('#sMinEnd').value, place: $('#sMinPlace').value.trim(), note: $('#sMinNote').value.trim(),
+  });
+  saveState();
+  settingsDirty = false; fillSettingFields(); renderSettingsBar(); renderTop();
+  toast('설정을 저장했어요');
+  return true;
+}
+const onDraft = e => { if (DRAFT_IDS.includes(e.target.id)) markSettingsDirty(); };
+$('#tab-settings').addEventListener('input', onDraft);
+$('#tab-settings').addEventListener('change', onDraft);
 $('#sRound').addEventListener('click', e => {
   const v = e.target.closest('button')?.dataset.v; if (!v) return;
-  state.rounding = v; saveState(); setSeg('#sRound', v);
+  draftRound = v; setSeg('#sRound', v); markSettingsDirty();
 });
-
-$('#sVoucher').addEventListener('change', e => {
-  const v = toNum(e.target.value);
-  if (v < 1 || v > 50) { e.target.value = state.voucherRate; return toast('할인율은 1~50% 사이로 넣어 주세요'); }
-  state.voucherRate = v; e.target.value = v; saveState();
-  toast(`지역상품권 할인율을 ${v}%로 바꿨어요`);
-});
+$('#settingsSave').addEventListener('click', saveSettings);
+// 저장 안 한 설정이 있으면 창을 닫을 때 브라우저가 한 번 물어봄
+window.addEventListener('beforeunload', e => { if (settingsDirty) e.preventDefault(); });
 
 function renderMenuBook() {
   // 식당 이름 없이 저장된 메뉴('')는 메뉴가 있을 때만 보임
@@ -1946,21 +1988,12 @@ $('#mbAdd').addEventListener('click', () => {
   $('#mbMenu').value = ''; $('#mbPrice').value = '';   // 같은 식당 메뉴를 이어서 넣기 쉽게 식당은 남김
   toast(menu ? `${place} · ${menu} 저장했어요` : `${place} 저장했어요`);
 });
-$('#sAskMenu').addEventListener('change', e => {
-  state.askMenuSave = e.target.checked; saveState();
-  toast(e.target.checked ? '기록을 저장할 때 식당·메뉴 저장을 물어볼게요' : '이제 식당·메뉴를 자동으로 저장하지 않아요');
-});
 
 // 회의비 기본값 (새 회의비 기록에만 적용)
 function renderCorpSettings() {
   const c = state.corp;
   $('#sCorpNames').innerHTML = c.names.map((n, i) => `<span>${esc(n)}<button data-i="${i}" aria-label="${esc(n)} 빼기">✕</button></span>`).join('')
     || '<p class="hint" style="margin:0">기본 명단이 비어 있어요.</p>';
-  $('#sCorpBudget').value = c.budget ? fmt(c.budget) : '';
-  $('#sCorpLimit').value = c.limit ? fmt(c.limit) : '';
-  $('#sCorpTrip').value = c.tripFee ? fmt(c.tripFee) : '';
-  $('#sMinStart').value = c.start; $('#sMinEnd').value = c.end;
-  $('#sMinPlace').value = c.place; $('#sMinNote').value = c.note;
 }
 function addCorpName() {
   const input = $('#sCorpName'), name = input.value.trim();
@@ -1974,11 +2007,8 @@ $('#sCorpNames').addEventListener('click', e => {
   const i = e.target.closest('[data-i]')?.dataset.i; if (i == null) return;
   state.corp.names.splice(Number(i), 1); saveState(); renderCorpSettings();
 });
-bindAmount($('#sCorpBudget'), v => { state.corp.budget = v; saveState(); });
-bindAmount($('#sCorpTrip'), v => { state.corp.tripFee = v; saveState(); });
-bindAmount($('#sCorpLimit'), v => { state.corp.limit = v; saveState(); });   // 비우면 결의 인원 계산을 안 함
-[['#sMinStart', 'start'], ['#sMinEnd', 'end'], ['#sMinPlace', 'place'], ['#sMinNote', 'note']].forEach(([sel, key]) =>
-  $(sel).addEventListener('change', e => { state.corp[key] = e.target.value.trim(); saveState(); }));
+// 금액 칸은 콤마만 붙이고, 저장은 [설정 저장]에서 (인당 한도를 비우면 결의 인원 계산을 안 함)
+['#sCorpBudget', '#sCorpTrip', '#sCorpLimit'].forEach(sel => bindAmount($(sel), () => {}));
 
 function addMember() {
   const input = $('#newMember');
@@ -2101,7 +2131,7 @@ $('#importFile').addEventListener('change', async e => {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.meals) || !Array.isArray(data.members)) throw new Error();
     if (!confirm(`기록 ${data.meals.length}건을 불러올까요? 지금 데이터는 덮어써져요.`)) return;
-    state = Object.assign(defaultState(), data);
+    state = Object.assign(defaultState(), data); settingsDirty = false;
     ensureMenuBook();
     saveState(); form = blankForm(); showTab('settings');
     toast('백업을 불러왔어요');
@@ -2110,7 +2140,7 @@ $('#importFile').addEventListener('change', async e => {
 });
 $('#resetBtn').addEventListener('click', () => {
   if (!confirm('모든 기록과 팀원 정보를 지울까요? 되돌릴 수 없어요.')) return;
-  state = defaultState(); ensureMenuBook(); saveState(); form = blankForm(); showTab('settings');
+  state = defaultState(); ensureMenuBook(); settingsDirty = false; saveState(); form = blankForm(); showTab('settings');
   toast('초기화했어요');
 });
 
